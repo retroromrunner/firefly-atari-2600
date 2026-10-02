@@ -2,6 +2,8 @@
 
 A minimal, clean Atari 2600 proof-of-concept game. Built as a starting point for new Atari 2600 homebrew projects.
 
+![FIREFLY gameplay](screenshot.png)
+
 ## What it does
 
 - **Title screen**: `FIREFLY` block text, blinking yellow firefly dot, blinking `PRESS FIRE`
