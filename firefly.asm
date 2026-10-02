@@ -28,6 +28,9 @@ GRP0    = $1B
 GRP1    = $1C
 ENAM0   = $1D
 ENABL   = $1F
+AUDC0   = $15
+AUDF0   = $17
+AUDV0   = $19
 HMP0    = $20
 HMP1    = $21
 HMM0    = $22
@@ -53,6 +56,8 @@ EmberY      = $89    ; collectible Y
 Rand        = $8A    ; RNG state (nonzero)
 ScoreP0     = $8B    ; tens digit pointer (2 bytes)
 ScoreP1     = $8D    ; ones digit pointer (2 bytes)
+SfxT        = $8F    ; collect sound timer (0=off)
+MusT        = $90    ; start jingle timer (0=off)
 
 ; ==================== Code ====================
     ORG $F000
@@ -244,6 +249,8 @@ TitleFrame:
     sta COLUBK          ; black background
     lda #$0E
     sta COLUPF          ; white text
+    lda #0
+    sta AUDV0           ; mute audio on title
     ; position ball for firefly glow
     lda #80
     jsr PosXBall
@@ -328,6 +335,8 @@ TitleDone:
     bne TitleOsw
     lda #1
     sta State
+    lda #30
+    sta MusT            ; trigger start jingle
 TitleOsw:
     sta WSYNC
     lda INTIM
@@ -379,7 +388,7 @@ NotDown:
     and #$40            ; Left
     bne NotLeft
     lda FireX
-    cmp #4
+    cmp #1
     bcc NotLeft
     dec FireX
 NotLeft:
@@ -387,10 +396,19 @@ NotLeft:
     and #$80            ; Right
     bne NotRight
     lda FireX
-    cmp #148
+    cmp #140
     bcs NotRight
     inc FireX
 NotRight:
+    ; safety: if FireX ever wraps/invalid (>160), reset to center
+    lda FireX
+    cmp #161
+    bcc NoWrapFix
+    lda #80
+    sta FireX
+    lda #76
+    sta FireY
+NoWrapFix:
     ; ---- collision: firefly vs ember ----
     lda FireX
     sec
@@ -412,7 +430,7 @@ CXPos:
 CYPos:
     cmp #11
     bcs NoHit
-    ; collect! score+1 (BCD), respawn ember
+    ; collect! score+1 (BCD), respawn ember, play sound
     sed
     clc
     lda Score
@@ -420,6 +438,8 @@ CYPos:
     cld
     sta Score
     jsr NewEmber
+    lda #12
+    sta SfxT            ; trigger collect blip
 NoHit:
     ; ---- score digit pointers (tens*8, ones*8 into Digits) ----
     lda Score
@@ -459,6 +479,44 @@ NoHit:
     jsr PosXP1          ; score ones digit
     sta WSYNC
     sta HMOVE
+    ; ---- audio: collect blip (priority) or start jingle ----
+    lda SfxT
+    beq TryMus
+    lda #$04
+    sta AUDC0           ; pure tone
+    lda SfxT
+    sta AUDF0           ; pitch rises as timer counts down
+    lda #$08
+    sta AUDV0
+    dec SfxT
+    jmp AudioDone
+TryMus:
+    lda MusT
+    beq MuteAudio
+    lda #$04
+    sta AUDC0
+    lda MusT
+    cmp #21
+    bcs MusN0
+    cmp #11
+    bcs MusN1
+    lda #8              ; note 2 (high)
+    jmp MusPlay
+MusN0:
+    lda #20             ; note 0 (low)
+    jmp MusPlay
+MusN1:
+    lda #14             ; note 1 (mid)
+MusPlay:
+    sta AUDF0
+    lda #$08
+    sta AUDV0
+    dec MusT
+    jmp AudioDone
+MuteAudio:
+    lda #0
+    sta AUDV0
+AudioDone:
 GameVbw:
     sta WSYNC
     lda INTIM
@@ -512,22 +570,34 @@ TopWall:
     lda FireY
     cmp EmberY
     bcc BallFirst
-    ; ---- ember first ----
+    ; ---- ember first (FireY >= EmberY) ----
     ldx EmberY
     jsr BlankLines
-    jsr EmberBlock
+    jsr EmberBlock        ; 8 lines -> Y = EmberY+8
     lda FireY
     sec
     sbc EmberY
-    sbc #8
+    sbc #8                ; gap = FireY-EmberY-8
     bcs Gap1Ok
     lda #0
 Gap1Ok:
     tax
+    jsr BlankLines        ; Y = max(FireY, EmberY+8)
+    jsr BallBlock         ; 16 lines
+    ; rest = 168-16-max(FireY, EmberY+8); overlap if FireY < EmberY+8
+    lda FireY
+    sec
+    sbc EmberY
+    cmp #8
+    bcs NoOv1
+    lda #144              ; overlap: 168-16-(EmberY+8) = 144-EmberY
+    sec
+    sbc EmberY
+    tax
     jsr BlankLines
-    jsr BallBlock
-    ; rest: 168 - 16 - FireY = 152 - FireY
-    lda #152
+    jmp MidDone
+NoOv1:
+    lda #152              ; no overlap: 168-16-FireY
     sec
     sbc FireY
     tax
@@ -536,19 +606,31 @@ Gap1Ok:
 BallFirst:
     ldx FireY
     jsr BlankLines
-    jsr BallBlock
+    jsr BallBlock         ; 16 lines -> Y = FireY+16
     lda EmberY
     sec
     sbc FireY
-    sbc #16
+    sbc #16               ; gap = EmberY-FireY-16
     bcs Gap2Ok
     lda #0
 Gap2Ok:
     tax
+    jsr BlankLines        ; Y = max(EmberY, FireY+16)
+    jsr EmberBlock        ; 8 lines
+    ; rest = 168-8-max(EmberY, FireY+16); overlap if EmberY < FireY+16
+    lda EmberY
+    sec
+    sbc FireY
+    cmp #16
+    bcs NoOv2
+    lda #144              ; overlap: 168-8-(FireY+16) = 144-FireY
+    sec
+    sbc FireY
+    tax
     jsr BlankLines
-    jsr EmberBlock
-    ; rest: 168 - 8 - EmberY = 160 - EmberY
-    lda #160
+    jmp MidDone
+NoOv2:
+    lda #160              ; no overlap: 168-8-EmberY
     sec
     sbc EmberY
     tax
