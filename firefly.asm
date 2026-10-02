@@ -1,9 +1,9 @@
 ; FIREFLY - Atari 2600 proof of concept
-; Minimal game: title screen + movable firefly sprite
-; 
+; Title screen + collect-the-embers gameplay with score
+;
 ; Controls:
 ;   Title: Press FIRE to start
-;   Game: Joystick moves firefly, FIRE toggles glow
+;   Game: Joystick moves firefly, collect blinking embers for +1 each
 
     processor 6502
 
@@ -13,6 +13,7 @@ VBLANK  = $01
 WSYNC   = $02
 NUSIZ0  = $04
 COLUP0  = $06
+COLUP1  = $07
 COLUPF  = $08
 COLUBK  = $09
 CTRLPF  = $0A
@@ -20,14 +21,21 @@ PF0     = $0D
 PF1     = $0E
 PF2     = $0F
 RESP0   = $10
+RESP1   = $11
+RESM0   = $12
 RESBL   = $14
 GRP0    = $1B
 GRP1    = $1C
+ENAM0   = $1D
 ENABL   = $1F
 HMP0    = $20
+HMP1    = $21
+HMM0    = $22
+HMBL    = $24
 HMOVE   = $2A
 HMCLR   = $2B
 CXCLR   = $2C
+INPT4   = $0C
 SWCHA   = $0280
 INTIM   = $0284
 TIM64T  = $0296
@@ -36,9 +44,15 @@ TIM64T  = $0296
 State       = $80    ; 0=title, 1=game
 FrameCnt    = $81
 FireX       = $82    ; firefly X (0-159)
-FireY       = $83    ; firefly Y (0-191)
+FireY       = $83    ; firefly Y (0-151)
 Glow        = $84    ; 0=dim, 1=bright
-TP          = $85    ; text pointer (2 bytes)
+TP          = $85    ; text pointer (2 bytes: $85-$86)
+Score       = $87    ; BCD score 00-99
+EmberX      = $88    ; collectible X
+EmberY      = $89    ; collectible Y
+Rand        = $8A    ; RNG state (nonzero)
+ScoreP0     = $8B    ; tens digit pointer (2 bytes)
+ScoreP1     = $8D    ; ones digit pointer (2 bytes)
 
 ; ==================== Code ====================
     ORG $F000
@@ -66,10 +80,17 @@ ClearRam:
     ; init
     lda #80
     sta FireX
-    lda #96
+    lda #76
     sta FireY
     lda #1
     sta Glow
+    lda #0
+    sta Score
+    lda #$A5
+    sta Rand
+    lda #$20
+    sta NUSIZ0          ; missile 0 = 4px wide
+    jsr NewEmber
     jmp MainLoop
 
 ; ==================== Main Loop ====================
@@ -82,6 +103,7 @@ ToGame:
 
 ; ==================== VSYNC (3 lines) ====================
 VSYNC3:
+    sta WSYNC           ; align to scanline start so VSYNC fires at cycle 0
     lda #2
     sta VSYNC
     sta WSYNC
@@ -92,8 +114,8 @@ VSYNC3:
     rts
 
 ; ==================== Position Object ====================
-; A = x (0-159), X = 0 (P0)
-PosX:
+; A = x (0-159). X variants store to different HMxx/RESxx.
+PosXGen:
     sta WSYNC
     sec
 Div15:
@@ -104,8 +126,34 @@ Div15:
     asl
     asl
     asl
+    rts                 ; caller stores A to HMxx then RESxx
+
+; Position P0 (tens digit of score)
+PosXP0:
+    jsr PosXGen
     sta HMP0
     sta RESP0
+    rts
+
+; Position P1 (ones digit of score)
+PosXP1:
+    jsr PosXGen
+    sta HMP1
+    sta RESP1
+    rts
+
+; Position missile 0 (ember)
+PosXM0:
+    jsr PosXGen
+    sta HMM0
+    sta RESM0
+    rts
+
+; Position ball (firefly)
+PosXBall:
+    jsr PosXGen
+    sta HMBL
+    sta RESBL
     rts
 
 ; ==================== Blank Lines ====================
@@ -120,9 +168,37 @@ BLLoop:
 BLDone:
     rts
 
+; ==================== RNG ====================
+; 8-bit LFSR, returns random byte in A, updates Rand
+Rand8:
+    lda Rand
+    asl
+    bcc RandDone
+    eor #$B4
+RandDone:
+    sta Rand
+    rts
+
+; Place ember at random position inside walls
+NewEmber:
+    jsr Rand8
+    and #$7F
+    clc
+    adc #12             ; X: 12..139
+    sta EmberX
+    jsr Rand8
+    and #$7F
+    clc
+    adc #12             ; Y: 12..139
+    sta EmberY
+    rts
+
 ; ==================== Text12 ====================
-; Draw 12 lines of text from (TP). 72 bytes total.
-; Cycle-timed for correct PF writes.
+; Draw 12 lines of text from (TP). 72 bytes total (6 bytes/row).
+; Non-reflect 40-bit playfield: left PF0,PF1,PF2 then right PF0,PF1,PF2.
+; Cycle-timed: each PF write must land BEFORE the beam draws that section.
+;   L-PF0 @clk26 (draw 68), L-PF1 @clk57 (draw 84), L-PF2 @clk90 (draw 116),
+;   R-PF0 @clk123 (draw 148), R-PF1 @clk156 (draw 164), R-PF2 @clk189 (draw 196).
 Text12:
     ldy #0
     ldx #12
@@ -138,15 +214,13 @@ Text12Loop:
     sta PF2
     iny
     lda (TP),y
+    sta PF0
     iny
-    nop
-    nop
-    sta PF2
     lda (TP),y
     sta PF1
     iny
     lda (TP),y
-    sta PF0
+    sta PF2
     iny
     dex
     bne Text12Loop
@@ -156,6 +230,8 @@ Text12Loop:
 TitleFrame:
     jsr VSYNC3
     ; VBLANK (37 lines)
+    lda #2
+    sta VBLANK
     lda #43
     sta TIM64T
     lda #0
@@ -170,13 +246,15 @@ TitleFrame:
     sta COLUPF          ; white text
     ; position ball for firefly glow
     lda #80
-    ldx #4
     jsr PosXBall
     sta WSYNC
     sta HMOVE
 TitleVbw:
+    sta WSYNC
     lda INTIM
     bne TitleVbw
+    lda #0
+    sta VBLANK
     ; Kernel (192 lines)
     ldx #40
     jsr BlankLines
@@ -239,43 +317,29 @@ TitleDone:
     ldx #68
     jsr BlankLines
     ; Overscan (30 lines)
+    lda #2
+    sta VBLANK
     lda #35
     sta TIM64T
     inc FrameCnt
-    ; check fire button
-    lda SWCHA
-    and #$80            ; P0 fire? (actually INPT4, but use SWCHA for simplicity)
-    ; Real fire: use INPT4 ($0C)
-    lda $0C
+    ; check fire button (INPT4: bit set = not pressed)
+    lda INPT4
     and #$80
-    bne TitleOsw        ; not pressed (bit set = not pressed)
+    bne TitleOsw
     lda #1
     sta State
 TitleOsw:
+    sta WSYNC
     lda INTIM
     bne TitleOsw
     jmp MainLoop
 
-; Position ball (X=4)
-PosXBall:
-    sta WSYNC
-    sec
-Div15B:
-    sbc #15
-    bcs Div15B
-    eor #7
-    asl
-    asl
-    asl
-    asl
-    sta $24             ; HMBL
-    sta RESBL
-    rts
-
 ; ==================== GAME FRAME ====================
 GameFrame:
     jsr VSYNC3
-    ; VBLANK
+    ; VBLANK (37 lines)
+    lda #2
+    sta VBLANK
     lda #43
     sta TIM64T
     lda #0
@@ -285,6 +349,7 @@ GameFrame:
     sta GRP0
     sta GRP1
     sta ENABL
+    sta ENAM0
     sta HMCLR
     lda #$00
     sta COLUBK          ; BLACK background
@@ -292,7 +357,9 @@ GameFrame:
     sta CTRLPF          ; reflect playfield + 8px ball
     lda #$1E
     sta COLUPF          ; yellow (walls + firefly)
-    ; read joystick (no wraparound)
+    sta COLUP0          ; yellow ember (missile 0 uses player 0 color)
+    sta COLUP1
+    ; ---- read joystick ----
     lda SWCHA
     and #$10            ; Up
     bne NotUp
@@ -304,7 +371,7 @@ NotUp:
     and #$20            ; Down
     bne NotDown
     lda FireY
-    cmp #158
+    cmp #152
     bcs NotDown
     inc FireY
 NotDown:
@@ -324,18 +391,106 @@ NotLeft:
     bcs NotRight
     inc FireX
 NotRight:
-    lda #$1E
-    sta COLUPF          ; yellow walls + firefly
-    ; position ball at FireX
+    ; ---- collision: firefly vs ember ----
     lda FireX
-    ldx #4
-    jsr PosXBall
+    sec
+    sbc EmberX
+    bcs CXPos
+    eor #$FF
+    clc
+    adc #1
+CXPos:
+    cmp #9
+    bcs NoHit
+    lda FireY
+    sec
+    sbc EmberY
+    bcs CYPos
+    eor #$FF
+    clc
+    adc #1
+CYPos:
+    cmp #11
+    bcs NoHit
+    ; collect! score+1 (BCD), respawn ember
+    sed
+    clc
+    lda Score
+    adc #1
+    cld
+    sta Score
+    jsr NewEmber
+NoHit:
+    ; ---- score digit pointers (tens*8, ones*8 into Digits) ----
+    lda Score
+    and #$F0
+    lsr
+    lsr
+    lsr
+    lsr
+    asl
+    asl
+    asl
+    clc
+    adc #<Digits
+    sta ScoreP0
+    lda #>Digits
+    adc #0
+    sta ScoreP0+1
+    lda Score
+    and #$0F
+    asl
+    asl
+    asl
+    clc
+    adc #<Digits
+    sta ScoreP1
+    lda #>Digits
+    adc #0
+    sta ScoreP1+1
+    ; ---- position objects ----
+    lda FireX
+    jsr PosXBall        ; firefly
+    lda EmberX
+    jsr PosXM0          ; ember
+    lda #68
+    jsr PosXP0          ; score tens digit
+    lda #76
+    jsr PosXP1          ; score ones digit
     sta WSYNC
     sta HMOVE
 GameVbw:
+    sta WSYNC
     lda INTIM
     bne GameVbw
-    ; Kernel (192 lines) with walls
+    lda #0
+    sta VBLANK
+    ; ==================== Kernel (192 lines) ====================
+    ; Score: 8 lines (score mode; set all player/pf colors white
+    ; so digits show regardless of which color source score mode uses)
+    lda #2
+    sta CTRLPF          ; score mode
+    lda #$0E
+    sta COLUPF          ; white digits
+    sta COLUP0
+    sta COLUP1
+    ldy #7
+ScoreLp:
+    sta WSYNC
+    lda (ScoreP0),y
+    sta GRP0
+    lda (ScoreP1),y
+    sta GRP1
+    dey
+    bpl ScoreLp
+    lda #0
+    sta GRP0
+    sta GRP1
+    lda #$31
+    sta CTRLPF          ; reflect + 8px ball
+    lda #$1E
+    sta COLUPF          ; yellow walls
+    sta COLUP0          ; yellow ember
     ; Top wall (8 lines) - full width
     lda #$FF
     sta PF0
@@ -346,42 +501,58 @@ TopWall:
     sta WSYNC
     dex
     bne TopWall
-    ; Middle (176 lines) - side walls only
+    ; Middle (168 lines) - side walls only
     lda #$10            ; 4px on each side (with reflect)
     sta PF0
     lda #0
     sta PF1
     sta PF2
-    ; ball at FireY (0-160)
-    ldx FireY
+    ; draw ball (16 lines) and ember (8 lines) in Y order
+    lda FireY
+    cmp EmberY
+    bcc BallFirst
+    ; ---- ember first ----
+    ldx EmberY
     jsr BlankLines
-    ; ball (16 lines, blinking)
-    lda FrameCnt
-    and #$10
-    beq BallOff
-    ldx #16
-BallOn:
-    sta WSYNC
-    lda #2
-    sta ENABL
-    dex
-    bne BallOn
-    jmp BallDone
-BallOff:
-    ldx #16
-BallOffLp:
-    sta WSYNC
-    dex
-    bne BallOffLp
-BallDone:
+    jsr EmberBlock
+    lda FireY
+    sec
+    sbc EmberY
+    sbc #8
+    bcs Gap1Ok
     lda #0
-    sta ENABL
-    ; rest of middle: 176 - 16 - FireY = 160 - FireY
-    lda #160
+Gap1Ok:
+    tax
+    jsr BlankLines
+    jsr BallBlock
+    ; rest: 168 - 16 - FireY = 152 - FireY
+    lda #152
     sec
     sbc FireY
     tax
     jsr BlankLines
+    jmp MidDone
+BallFirst:
+    ldx FireY
+    jsr BlankLines
+    jsr BallBlock
+    lda EmberY
+    sec
+    sbc FireY
+    sbc #16
+    bcs Gap2Ok
+    lda #0
+Gap2Ok:
+    tax
+    jsr BlankLines
+    jsr EmberBlock
+    ; rest: 168 - 8 - EmberY = 160 - EmberY
+    lda #160
+    sec
+    sbc EmberY
+    tax
+    jsr BlankLines
+MidDone:
     ; Bottom wall (8 lines) - full width
     lda #$FF
     sta PF0
@@ -397,33 +568,108 @@ BotWall:
     sta PF1
     sta PF2
     ; Overscan (30 lines)
+    lda #2
+    sta VBLANK
     lda #35
     sta TIM64T
     inc FrameCnt
 GameOsw:
+    sta WSYNC
     lda INTIM
     bne GameOsw
     jmp MainLoop
 
+; ==================== Draw Blocks ====================
+; Firefly: ball, 16 lines, blinking
+BallBlock:
+    lda FrameCnt
+    and #$10
+    beq BallBlkOff
+    ldx #16
+BallBlkOn:
+    sta WSYNC
+    lda #2
+    sta ENABL
+    dex
+    bne BallBlkOn
+    jmp BallBlkDone
+BallBlkOff:
+    ldx #16
+BallBlkOffLp:
+    sta WSYNC
+    dex
+    bne BallBlkOffLp
+BallBlkDone:
+    lda #0
+    sta ENABL
+    rts
+
+; Ember: missile 0, 8 lines, blinking (different rate than firefly)
+EmberBlock:
+    lda FrameCnt
+    and #$08
+    beq EmberBlkOff
+    ldx #8
+EmberBlkOn:
+    sta WSYNC
+    lda #2
+    sta ENAM0
+    dex
+    bne EmberBlkOn
+    jmp EmberBlkDone
+EmberBlkOff:
+    ldx #8
+EmberBlkOffLp:
+    sta WSYNC
+    dex
+    bne EmberBlkOffLp
+EmberBlkDone:
+    lda #0
+    sta ENAM0
+    rts
+
 ; ==================== Data ====================
+; Digit font: 10 digits x 8 scanlines, MSB left
+Digits:
+    ; 0
+    .byte $3C,$66,$6E,$76,$66,$66,$3C,$00
+    ; 1
+    .byte $18,$38,$18,$18,$18,$18,$3C,$00
+    ; 2
+    .byte $3C,$66,$06,$0C,$30,$60,$7E,$00
+    ; 3
+    .byte $3E,$0C,$18,$0C,$06,$66,$3C,$00
+    ; 4
+    .byte $0C,$1C,$3C,$6C,$7E,$0C,$0C,$00
+    ; 5
+    .byte $7E,$60,$7C,$06,$06,$66,$3C,$00
+    ; 6
+    .byte $1C,$30,$60,$7C,$66,$66,$3C,$00
+    ; 7
+    .byte $7E,$06,$0C,$18,$30,$30,$30,$00
+    ; 8
+    .byte $3C,$66,$66,$3C,$66,$66,$3C,$00
+    ; 9
+    .byte $3C,$66,$66,$7E,$06,$0C,$38,$00
+
 FireflySpr:
     .byte $18, $3C, $7E, $FF, $FF, $7E, $3C, $18
 
 ; Text data
 ; "FIREFLY"
 TextFire:
-    .byte $F0,$FE,$FF,$91,$00,$00
-    .byte $F0,$FE,$FF,$91,$00,$00
-    .byte $10,$69,$11,$91,$00,$00
-    .byte $10,$69,$11,$91,$00,$00
-    .byte $70,$69,$77,$61,$00,$00
-    .byte $70,$69,$77,$61,$00,$00
-    .byte $10,$6C,$11,$61,$00,$00
-    .byte $10,$6C,$11,$61,$00,$00
-    .byte $10,$6A,$11,$61,$00,$00
-    .byte $10,$6A,$11,$61,$00,$00
-    .byte $10,$F9,$1F,$6F,$00,$00
-    .byte $10,$F9,$1F,$6F,$00,$00
+    .byte $F0,$FE,$FF,$00,$00,$91
+    .byte $F0,$FE,$FF,$00,$00,$91
+    .byte $10,$69,$11,$00,$00,$91
+    .byte $10,$69,$11,$00,$00,$91
+    .byte $70,$69,$77,$00,$00,$61
+    .byte $70,$69,$77,$00,$00,$61
+    .byte $10,$6C,$11,$00,$00,$61
+    .byte $10,$6C,$11,$00,$00,$61
+    .byte $10,$6A,$11,$00,$00,$61
+    .byte $10,$6A,$11,$00,$00,$61
+    .byte $10,$F9,$1F,$00,$00,$6F
+    .byte $10,$F9,$1F,$00,$00,$6F
 
 TextPress:
     .byte $70,$EF,$EE,$F0,$FE,$F0
@@ -436,11 +682,11 @@ TextPress:
     .byte $70,$C8,$88,$10,$6C,$10
     .byte $10,$A8,$88,$10,$6A,$10
     .byte $10,$A8,$88,$10,$6A,$10
-    .byte $10,$9F,$77,$10,$F9,$F0
-    .byte $10,$9F,$77,$10,$F9,$F0
+    .byte $10,$9F,$77,$F0,$F9,$10
+    .byte $10,$9F,$77,$F0,$F9,$10
 
 ; ==================== Vectors ====================
-    ORG $FFFC
-    .word Start
-    .word Start
-    .word Start
+    ORG $FFFA
+    .word Start           ; NMI
+    .word Start           ; RESET
+    .word Start           ; IRQ
