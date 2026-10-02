@@ -7,8 +7,9 @@ A minimal, clean Atari 2600 proof-of-concept game. Built as a starting point for
 ## What it does
 
 - **Title screen**: `FIREFLY` block text, blinking yellow firefly dot, blinking `PRESS FIRE`
-- **Gameplay**: Press fire to start. Joystick moves the blinking firefly around a walled playfield. The firefly stops at the walls — it can't leave the screen.
-- **Embers & score**: A blinking ember (missile 0) appears at a random spot. Fly into it to collect it for **+1** — the score (00–99, BCD) shows at the top of the screen in TIA score mode, and a new ember spawns elsewhere.
+- **Gameplay**: Press fire to start (plays a 3-note start jingle). Joystick moves the blinking firefly around a walled playfield. The firefly stops at the walls — it can't leave the screen.
+- **Embers & score**: A blinking ember (missile 0) appears at a random spot. Fly into it to collect it for **+1** — with a collect sound blip — the score (00–99, BCD) shows at the top of the screen in TIA score mode, and a new ember spawns elsewhere.
+- **Audio**: TIA square-wave SFX (collect blip, start jingle) via `AUDC0`/`AUDF0`/`AUDV0`
 
 ## Files
 
