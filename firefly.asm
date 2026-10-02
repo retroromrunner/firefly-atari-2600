@@ -379,7 +379,7 @@ NotDown:
     and #$40            ; Left
     bne NotLeft
     lda FireX
-    cmp #8
+    cmp #4
     bcc NotLeft
     dec FireX
 NotLeft:
@@ -387,7 +387,7 @@ NotLeft:
     and #$80            ; Right
     bne NotRight
     lda FireX
-    cmp #150
+    cmp #148
     bcs NotRight
     inc FireX
 NotRight:
@@ -474,15 +474,16 @@ GameVbw:
     sta COLUPF          ; white digits
     sta COLUP0
     sta COLUP1
-    ldy #7
+    ldy #0
 ScoreLp:
     sta WSYNC
     lda (ScoreP0),y
     sta GRP0
     lda (ScoreP1),y
     sta GRP1
-    dey
-    bpl ScoreLp
+    iny
+    cpy #8
+    bne ScoreLp
     lda #0
     sta GRP0
     sta GRP1
