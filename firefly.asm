@@ -100,6 +100,8 @@ HD          = $AE    ; draw slot D: height
 TD          = $AF    ; draw slot D: type (3=power ember)
 Gap3        = $B0    ; blank lines between C and D
 ShadeCol    = $B1    ; precomputed shade color for EnemyBlock
+PowT        = $B2    ; power-up sound timer (distinct timbre)
+FanT        = $B3    ; room fanfare timer (rising scale)
 
 ; ==================== Code ====================
     ORG $F000
@@ -150,6 +152,8 @@ ResetGame:
     sta HasFreeze
     sta FreezeT
     sta PowActive
+    sta PowT
+    sta FanT
     lda #1
     sta Room
     lda #80
@@ -206,8 +210,8 @@ NextRoom:
     lda TickTable,x
     sta MoveT
     jsr NewEmber
-    lda #48
-    sta SfxT            ; room-enter fanfare (rises, reverse of death fall)
+    lda #1
+    sta FanT            ; room-enter fanfare (rising scale)
     rts
 
 ; ==================== Main Loop ====================
@@ -710,8 +714,8 @@ PYPos:
     sta PowActive        ; consumed
     lda #1
     sta HasFreeze
-    lda #44
-    sta SfxT             ; power-up sound (distinct, longer)
+    lda #30
+    sta PowT             ; power-up sound (distinct timbre, overrides others)
 NoHit:
     ; ---- shade AI: chase the firefly (unless frozen) ----
     lda FreezeT
@@ -865,6 +869,14 @@ SkipLogic:
     sta State
     jmp AudioDone
 AudioNormal:
+    lda FanT
+    beq ChkPow
+    jmp DoFan
+ChkPow:
+    lda PowT
+    beq ChkSfx
+    jmp DoPow
+ChkSfx:
     lda SfxT
     beq TryMus
     lda #$04
@@ -902,6 +914,39 @@ MuteAudio:
     lda #0
     sta AUDV0
 AudioDone:
+    jmp AudioSort
+; ---- far audio handlers (keep death bne in range) ----
+DoFan:
+    ; room fanfare: rising musical scale, FanT=1..32, 4 frames/note
+    lda FanT
+    cmp #33
+    bcs FanDone
+    lsr
+    lsr
+    tax
+    lda FanScale,x
+    sta AUDF0
+    lda #$04
+    sta AUDC0
+    lda #$08
+    sta AUDV0
+    inc FanT
+    jmp AudioSort
+FanDone:
+    lda #0
+    sta FanT
+    jmp AudioSort
+DoPow:
+    ; power-up: distinct distorted timbre
+    lda #$0C
+    sta AUDC0
+    lda PowT
+    sta AUDF0
+    lda #$08
+    sta AUDV0
+    dec PowT
+    jmp AudioSort
+AudioSort:
     ; ---- sort draw slots by Y (A=top) ----
     ; Ball draw Y clamped to 144 so the pushed 3-object layout
     ; always fits in the 168-line middle (logic FireY unaffected).
@@ -1366,6 +1411,11 @@ Digits:
     .byte $3C,$66,$66,$3C,$66,$66,$3C,$00
     ; 9
     .byte $3C,$66,$66,$7E,$06,$0C,$38,$00
+
+; Room fanfare scale: 8 rising notes (AUDF0, lower = higher pitch)
+; Reverse of death fall - musical scale up
+FanScale:
+    .byte 31,27,23,19,15,11,7,4
 
 ; Shade sprite (8x8 ghost, top row first)
 EnemySpr:
