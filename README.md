@@ -4,6 +4,8 @@ A minimal, clean Atari 2600 proof-of-concept game — now with a chaser enemy an
 
 ![FIREFLY gameplay](screenshot.png)
 
+![FIREFLY gameplay video](gameplay.gif)
+
 ## What it does
 
 - **Title screen**: `FIREFLY` block text, blinking yellow firefly dot, blinking `PRESS FIRE`
