@@ -1,9 +1,14 @@
 ; FIREFLY - Atari 2600 proof of concept
 ; Title screen + collect-the-embers gameplay with score
+; v2: border clamps corrected (ball kisses walls, no overlap/gap),
+;     the SHADE (chaser enemy, Player 1 sprite) and multi-room progression.
 ;
 ; Controls:
 ;   Title: Press FIRE to start
 ;   Game: Joystick moves firefly, collect blinking embers for +1 each
+;   Avoid the shade! It gets faster and hotter-colored as you score.
+;   When you've collected enough embers, a door opens in the bottom wall -
+;   fly through it to escape to the next room (new color, faster shade).
 
     processor 6502
 
@@ -27,6 +32,7 @@ RESBL   = $14
 GRP0    = $1B
 GRP1    = $1C
 ENAM0   = $1D
+ENAM1   = $1E
 ENABL   = $1F
 AUDC0   = $15
 AUDF0   = $17
@@ -47,8 +53,8 @@ TIM64T  = $0296
 State       = $80    ; 0=title, 1=game
 FrameCnt    = $81
 FireX       = $82    ; firefly X (0-159)
-FireY       = $83    ; firefly Y (0-151)
-Glow        = $84    ; 0=dim, 1=bright
+FireY       = $83    ; firefly Y (0-166 in door shaft)
+Glow        = $84    ; (unused)
 TP          = $85    ; text pointer (2 bytes: $85-$86)
 Score       = $87    ; BCD score 00-99
 EmberX      = $88    ; collectible X
@@ -56,8 +62,30 @@ EmberY      = $89    ; collectible Y
 Rand        = $8A    ; RNG state (nonzero)
 ScoreP0     = $8B    ; tens digit pointer (2 bytes)
 ScoreP1     = $8D    ; ones digit pointer (2 bytes)
-SfxT        = $8F    ; collect sound timer (0=off)
+SfxT        = $8F    ; sound effect timer (0=off)
 MusT        = $90    ; start jingle timer (0=off)
+EnemyX      = $91    ; shade X
+EnemyY      = $92    ; shade Y
+MoveT       = $93    ; shade move countdown
+Room        = $94    ; current room (1..)
+RoomScore   = $95    ; binary points collected this room
+Points      = $96    ; binary total points (drives shade speed)
+DoorOpen    = $97    ; 0=closed, 1=open
+DeathT      = $98    ; death anim timer (0=alive)
+YA          = $99    ; draw slot A: Y (topmost)
+YB          = $9A    ; draw slot B: Y
+YC          = $9B    ; draw slot C: Y
+HA          = $9C    ; draw slot A: height
+HB          = $9D
+HC          = $9E
+TA          = $9F    ; draw slot A: type (0=ball,1=ember,2=shade)
+TB          = $A0
+TC          = $A1
+TMP         = $A2    ; scratch
+Gap0        = $A3    ; blank lines before A
+Gap1        = $A4    ; blank lines between A and B
+Gap2        = $A5    ; blank lines between B and C
+Rest        = $A6    ; blank lines after C
 
 ; ==================== Code ====================
     ORG $F000
@@ -83,20 +111,83 @@ ClearRam:
     cpx #$80
     bne ClearRam
     ; init
-    lda #80
-    sta FireX
-    lda #76
-    sta FireY
     lda #1
     sta Glow
-    lda #0
-    sta Score
     lda #$A5
     sta Rand
     lda #$20
     sta NUSIZ0          ; missile 0 = 4px wide
-    jsr NewEmber
+    jsr ResetGame
     jmp MainLoop
+
+; ==================== Reset Game ====================
+; Full reset: score, room, shade, door, player. Used at boot,
+; after death, and (partially) on room change - see NextRoom.
+ResetGame:
+    lda #0
+    sta Score
+    sta Points
+    sta RoomScore
+    sta DoorOpen
+    sta DeathT
+    sta SfxT
+    sta MusT
+    lda #1
+    sta Room
+    lda #80
+    sta FireX
+    lda #76
+    sta FireY
+    lda #12
+    sta EnemyX
+    lda #140
+    sta EnemyY
+    jsr CalcLevel
+    tax
+    lda TickTable,x
+    sta MoveT
+    jsr NewEmber
+    rts
+
+; ==================== Shade speed level ====================
+; A = min(6, Points/4 + Room - 1). Higher = faster + hotter color.
+CalcLevel:
+    lda Points
+    lsr
+    lsr                 ; Points/4
+    clc
+    adc Room
+    sec
+    sbc #1              ; +Room-1
+    cmp #7
+    bcc CLDone
+    lda #6
+CLDone:
+    rts
+
+; ==================== Next Room ====================
+; Player escaped through the door. Harder room, same arena.
+NextRoom:
+    inc Room
+    lda #0
+    sta RoomScore
+    sta DoorOpen
+    lda #80
+    sta FireX
+    lda #16
+    sta FireY
+    lda #12
+    sta EnemyX
+    lda #140
+    sta EnemyY
+    jsr CalcLevel
+    tax
+    lda TickTable,x
+    sta MoveT
+    jsr NewEmber
+    lda #16
+    sta SfxT            ; room-enter blip
+    rts
 
 ; ==================== Main Loop ====================
 MainLoop:
@@ -133,14 +224,14 @@ Div15:
     asl
     rts                 ; caller stores A to HMxx then RESxx
 
-; Position P0 (tens digit of score)
+; Position P0 (score tens digit)
 PosXP0:
     jsr PosXGen
     sta HMP0
     sta RESP0
     rts
 
-; Position P1 (ones digit of score)
+; Position P1 (score ones digit / shade - repositioned mid-kernel)
 PosXP1:
     jsr PosXGen
     sta HMP1
@@ -185,6 +276,7 @@ RandDone:
     rts
 
 ; Place ember at random position inside walls
+; Y is clamped to 136 so the 3-object draw layout always fits in 168 lines.
 NewEmber:
     jsr Rand8
     and #$7F
@@ -195,6 +287,10 @@ NewEmber:
     and #$7F
     clc
     adc #12             ; Y: 12..139
+    cmp #137
+    bcc EmYOk
+    lda #136            ; clamp Y to 136
+EmYOk:
     sta EmberY
     rts
 
@@ -359,15 +455,26 @@ GameFrame:
     sta GRP1
     sta ENABL
     sta ENAM0
+    sta ENAM1
     sta HMCLR
     lda #$00
     sta COLUBK          ; BLACK background
+    ; death flash: blink background red while dying
+    lda DeathT
+    beq NoDeathFlash
+    lda FrameCnt
+    and #$08
+    beq NoDeathFlash
+    lda #$40
+    sta COLUBK
+NoDeathFlash:
     lda #$31
     sta CTRLPF          ; reflect playfield + 8px ball
-    lda #$1E
-    sta COLUPF          ; yellow (walls + firefly)
-    sta COLUP0          ; yellow ember (missile 0 uses player 0 color)
-    sta COLUP1
+    ; ---- game logic (frozen during death anim) ----
+    lda DeathT
+    beq DoLogic
+    jmp SkipLogic
+DoLogic:
     ; ---- read joystick ----
     lda SWCHA
     and #$10            ; Up
@@ -381,23 +488,41 @@ NotUp:
     bne NotDown
     lda FireY
     cmp #152
+    bcc DownInc         ; below wall top: normal move
+    ; at/below wall: only through the open door shaft
+    lda DoorOpen
+    beq NotDown
+    lda FireX
+    cmp #66             ; door shaft x-range
+    bcc NotDown
+    cmp #86
     bcs NotDown
+    lda FireY
+    cmp #166
+    bcs NotDown
+DownInc:
     inc FireY
 NotDown:
     lda SWCHA
     and #$40            ; Left
     bne NotLeft
+    lda FireY
+    cmp #153
+    bcs NotLeft         ; in door shaft: no lateral move
     lda FireX
-    cmp #1
-    bcc NotLeft
+    cmp #5
+    bcc NotLeft         ; min X = 4 (ball kisses left wall)
     dec FireX
 NotLeft:
     lda SWCHA
     and #$80            ; Right
     bne NotRight
+    lda FireY
+    cmp #153
+    bcs NotRight        ; in door shaft: no lateral move
     lda FireX
-    cmp #140
-    bcs NotRight
+    cmp #148
+    bcs NotRight        ; max X = 148 (ball kisses right wall)
     inc FireX
 NotRight:
     ; safety: if FireX ever wraps/invalid (>160), reset to center
@@ -437,10 +562,110 @@ CYPos:
     adc #1
     cld
     sta Score
+    inc Points
+    inc RoomScore
     jsr NewEmber
     lda #12
-    sta SfxT            ; trigger collect blip
+    sta SfxT            ; collect blip
+    ; door opens when RoomScore >= 4+Room
+    lda DoorOpen
+    bne NoHit
+    lda Room
+    clc
+    adc #4
+    sta TMP
+    lda RoomScore
+    cmp TMP
+    bcc NoHit
+    lda #1
+    sta DoorOpen
+    lda #24
+    sta SfxT            ; door chime (overrides blip)
 NoHit:
+    ; ---- shade AI: chase the firefly ----
+    dec MoveT
+    bne SkipShadeMove
+    jsr CalcLevel
+    tax
+    lda TickTable,x
+    sta MoveT
+    ; move X toward player
+    lda EnemyX
+    cmp FireX
+    beq ExDone
+    bcc ExInc
+    dec EnemyX
+    jmp ExClamp
+ExInc:
+    inc EnemyX
+ExClamp:
+    lda EnemyX
+    cmp #5
+    bcc ExMin           ; min X = 4
+    cmp #149
+    bcc ExDone          ; max X = 148
+    lda #148
+    sta EnemyX
+    jmp ExDone
+ExMin:
+    lda #4
+    sta EnemyX
+ExDone:
+    ; move Y toward player
+    lda EnemyY
+    cmp FireY
+    beq EyDone
+    bcc EyInc
+    dec EnemyY
+    jmp EyClamp
+EyInc:
+    inc EnemyY
+EyClamp:
+    lda EnemyY
+    cmp #153
+    bcc EyDone          ; max Y = 152 (layout fit)
+    lda #152
+    sta EnemyY
+EyDone:
+SkipShadeMove:
+    ; ---- death check: shade catches firefly? ----
+    lda EnemyX
+    sec
+    sbc FireX
+    bcs EDXPos
+    eor #$FF
+    clc
+    adc #1
+EDXPos:
+    cmp #9
+    bcs NoDeath
+    lda EnemyY
+    sec
+    sbc FireY
+    bcs EDYPos
+    eor #$FF
+    clc
+    adc #1
+EDYPos:
+    cmp #11
+    bcs NoDeath
+    lda #50
+    sta DeathT          ; caught!
+NoDeath:
+    ; ---- door exit: fly through the open door ----
+    lda DoorOpen
+    beq SkipExit
+    lda FireY
+    cmp #162
+    bcc SkipExit
+    lda FireX
+    cmp #66
+    bcc SkipExit
+    cmp #86
+    bcs SkipExit
+    jsr NextRoom
+SkipExit:
+SkipLogic:
     ; ---- score digit pointers (tens*8, ones*8 into Digits) ----
     lda Score
     and #$F0
@@ -476,10 +701,31 @@ NoHit:
     lda #68
     jsr PosXP0          ; score tens digit
     lda #76
-    jsr PosXP1          ; score ones digit
+    jsr PosXP1          ; score ones digit (P1 repositioned mid-kernel for shade)
     sta WSYNC
     sta HMOVE
-    ; ---- audio: collect blip (priority) or start jingle ----
+    ; ---- audio ----
+    lda DeathT
+    beq AudioNormal
+    ; death sound: falling pitch buzz
+    lda DeathT
+    lsr
+    sta TMP
+    lda #31
+    sec
+    sbc TMP
+    sta AUDF0
+    lda #$08
+    sta AUDC0
+    lda #$08
+    sta AUDV0
+    dec DeathT
+    bne AudioDone
+    jsr ResetGame       ; death anim over: back to title
+    lda #0
+    sta State
+    jmp AudioDone
+AudioNormal:
     lda SfxT
     beq TryMus
     lda #$04
@@ -517,6 +763,83 @@ MuteAudio:
     lda #0
     sta AUDV0
 AudioDone:
+    ; ---- sort draw slots by Y (A=top) ----
+    ; Ball draw Y clamped to 144 so the pushed 3-object layout
+    ; always fits in the 168-line middle (logic FireY unaffected).
+    lda FireY
+    cmp #145
+    bcc BallYok
+    lda #144
+BallYok:
+    sta YA
+    lda #16
+    sta HA
+    lda #0
+    sta TA              ; 0 = firefly (ball)
+    lda EmberY
+    sta YB
+    lda #8
+    sta HB
+    lda #1
+    sta TB              ; 1 = ember (missile 0)
+    lda EnemyY
+    sta YC
+    lda #8
+    sta HC
+    lda #2
+    sta TC              ; 2 = shade (player 1)
+    lda YA
+    cmp YB
+    bcc SortS1
+    jsr SwapAB
+SortS1:
+    lda YB
+    cmp YC
+    bcc SortS2
+    jsr SwapBC
+SortS2:
+    lda YA
+    cmp YB
+    bcc SortS3
+    jsr SwapAB
+SortS3:
+    ; ---- draw layout: push down on Y overlap ----
+    ; Gaps are all >= 0 and sum to exactly 168 lines by construction.
+    lda YA
+    sta Gap0             ; Gap0 = YA
+    clc
+    adc HA               ; A = YA+HA = endA
+    sta TMP              ; TMP = endA
+    lda YB
+    cmp TMP              ; YB vs endA
+    bcs PBok
+    lda TMP
+PBok:                    ; A = PB = max(YB, endA)
+    sec
+    sbc TMP              ; Gap1 = PB-endA (>= 0)
+    sta Gap1
+    clc
+    adc TMP              ; A = PB
+    clc
+    adc HB               ; A = PB+HB = endB
+    sta TMP              ; TMP = endB
+    lda YC
+    cmp TMP              ; YC vs endB
+    bcs PCok
+    lda TMP
+PCok:                    ; A = PC = max(YC, endB)
+    sec
+    sbc TMP              ; Gap2 = PC-endB (>= 0)
+    sta Gap2
+    clc
+    adc TMP              ; A = PC
+    clc
+    adc HC               ; A = PC+HC = endC (<= 168 by Y limits)
+    sta TMP              ; TMP = endC
+    lda #168
+    sec
+    sbc TMP              ; Rest = 168-endC (>= 0)
+    sta Rest
 GameVbw:
     sta WSYNC
     lda INTIM
@@ -545,102 +868,78 @@ ScoreLp:
     lda #0
     sta GRP0
     sta GRP1
+    ; ---- per-room / per-level colors ----
     lda #$31
     sta CTRLPF          ; reflect + 8px ball
+    lda Room
+    sec
+    sbc #1
+    and #7
+    tax
+    lda RoomCols,x
+    sta COLUPF          ; walls (+ firefly, the ball uses COLUPF)
     lda #$1E
-    sta COLUPF          ; yellow walls
-    sta COLUP0          ; yellow ember
-    ; Top wall (8 lines) - full width
+    sta COLUP0          ; ember stays yellow
+    jsr CalcLevel
+    tax
+    lda EnemyCols,x
+    sta COLUP1          ; shade heats up with speed
+    ; Top wall (8 lines) - full width.
+    ; The last 2 lines reposition P1 for the shade: the score ones
+    ; digit needed P1 in VBLANK, the shade needs it in the middle.
     lda #$FF
     sta PF0
     sta PF1
     sta PF2
-    ldx #8
+    ldx #6
 TopWall:
     sta WSYNC
     dex
     bne TopWall
-    ; Middle (168 lines) - side walls only
+    lda EnemyX
+    jsr PosXP1          ; 1 line: coarse+fine for shade
+    lda #0
+    sta HMP0            ; clear other motions so the next
+    sta HMM0            ; HMOVE only moves the shade
+    sta HMBL
+    sta WSYNC           ; 1 line
+    sta HMOVE           ; apply shade fine offset
+    ; Middle (168 lines) - side walls, 3 objects in Y order.
+    ; Gaps precomputed in VBLANK; they sum to exactly 168 lines.
     lda #$10            ; 4px on each side (with reflect)
     sta PF0
     lda #0
     sta PF1
     sta PF2
-    ; draw ball (16 lines) and ember (8 lines) in Y order
-    lda FireY
-    cmp EmberY
-    bcc BallFirst
-    ; ---- ember first (FireY >= EmberY) ----
-    ldx EmberY
+    ldx Gap0
     jsr BlankLines
-    jsr EmberBlock        ; 8 lines -> Y = EmberY+8
-    lda FireY
-    sec
-    sbc EmberY
-    sbc #8                ; gap = FireY-EmberY-8
-    bcs Gap1Ok
-    lda #0
-Gap1Ok:
-    tax
-    jsr BlankLines        ; Y = max(FireY, EmberY+8)
-    jsr BallBlock         ; 16 lines
-    ; rest = 168-16-max(FireY, EmberY+8); overlap if FireY < EmberY+8
-    lda FireY
-    sec
-    sbc EmberY
-    cmp #8
-    bcs NoOv1
-    lda #144              ; overlap: 168-16-(EmberY+8) = 144-EmberY
-    sec
-    sbc EmberY
-    tax
+    lda TA
+    jsr DrawDispatch
+    ldx Gap1
     jsr BlankLines
-    jmp MidDone
-NoOv1:
-    lda #152              ; no overlap: 168-16-FireY
-    sec
-    sbc FireY
-    tax
+    lda TB
+    jsr DrawDispatch
+    ldx Gap2
     jsr BlankLines
-    jmp MidDone
-BallFirst:
-    ldx FireY
-    jsr BlankLines
-    jsr BallBlock         ; 16 lines -> Y = FireY+16
-    lda EmberY
-    sec
-    sbc FireY
-    sbc #16               ; gap = EmberY-FireY-16
-    bcs Gap2Ok
-    lda #0
-Gap2Ok:
-    tax
-    jsr BlankLines        ; Y = max(EmberY, FireY+16)
-    jsr EmberBlock        ; 8 lines
-    ; rest = 168-8-max(EmberY, FireY+16); overlap if EmberY < FireY+16
-    lda EmberY
-    sec
-    sbc FireY
-    cmp #16
-    bcs NoOv2
-    lda #144              ; overlap: 168-8-(FireY+16) = 144-FireY
-    sec
-    sbc FireY
-    tax
-    jsr BlankLines
-    jmp MidDone
-NoOv2:
-    lda #160              ; no overlap: 168-8-EmberY
-    sec
-    sbc EmberY
-    tax
+    lda TC
+    jsr DrawDispatch
+    ldx Rest
     jsr BlankLines
 MidDone:
-    ; Bottom wall (8 lines) - full width
+    ; Bottom wall (8 lines) - full width, or door gap when open.
+    ; Door: clear playfield bits 17-22 (24px centered, mirrored).
     lda #$FF
     sta PF0
     sta PF1
+    lda DoorOpen
+    beq DoorClosed
+    lda #$F8
     sta PF2
+    jmp DoorDraw
+DoorClosed:
+    lda #$FF
+    sta PF2
+DoorDraw:
     ldx #8
 BotWall:
     sta WSYNC
@@ -663,6 +962,17 @@ GameOsw:
     jmp MainLoop
 
 ; ==================== Draw Blocks ====================
+; Dispatch A: 0=firefly ball, 1=ember missile, 2=shade sprite
+DrawDispatch:
+    cmp #1
+    bcc DD_Ball
+    beq DD_Ember
+    jmp EnemyBlock
+DD_Ball:
+    jmp BallBlock
+DD_Ember:
+    jmp EmberBlock
+
 ; Firefly: ball, 16 lines, blinking
 BallBlock:
     lda FrameCnt
@@ -711,6 +1021,51 @@ EmberBlkDone:
     sta ENAM0
     rts
 
+; Shade: player 1, 8x8 ghost sprite, solid (no blink - it's scary)
+EnemyBlock:
+    ldy #0
+EnBlLp:
+    sta WSYNC
+    lda EnemySpr,y
+    sta GRP1
+    iny
+    cpy #8
+    bne EnBlLp
+    lda #0
+    sta GRP1
+    rts
+
+; ==================== Sort helpers ====================
+SwapAB:
+    lda YA
+    ldx YB
+    sta YB
+    stx YA
+    lda HA
+    ldx HB
+    sta HB
+    stx HA
+    lda TA
+    ldx TB
+    sta TB
+    stx TA
+    rts
+
+SwapBC:
+    lda YB
+    ldx YC
+    sta YC
+    stx YB
+    lda HB
+    ldx HC
+    sta HC
+    stx HB
+    lda TB
+    ldx TC
+    sta TC
+    stx TB
+    rts
+
 ; ==================== Data ====================
 ; Digit font: 10 digits x 8 scanlines, MSB left
 Digits:
@@ -735,8 +1090,28 @@ Digits:
     ; 9
     .byte $3C,$66,$66,$7E,$06,$0C,$38,$00
 
-FireflySpr:
-    .byte $18, $3C, $7E, $FF, $FF, $7E, $3C, $18
+; Shade sprite (8x8 ghost, top row first)
+EnemySpr:
+    .byte $3C  ; 00111100
+    .byte $7E  ; 01111110
+    .byte $FF  ; 11111111
+    .byte $A5  ; 10100101 (eyes)
+    .byte $FF  ; 11111111
+    .byte $FF  ; 11111111
+    .byte $DB  ; 11011011 (wavy bottom)
+    .byte $00
+
+; Shade speed: frames between 1px chase steps, by level 0-6
+TickTable:
+    .byte 8,6,5,4,3,2,2
+
+; Shade color by level: blue -> purple -> red -> orange -> yellow -> white
+EnemyCols:
+    .byte $84,$74,$44,$24,$1A,$0C,$0E
+
+; Wall color by room (index (Room-1) & 7)
+RoomCols:
+    .byte $1E,$9E,$C8,$48,$A8,$28,$68,$B8
 
 ; Text data
 ; "FIREFLY"
