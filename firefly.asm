@@ -185,8 +185,8 @@ NextRoom:
     lda TickTable,x
     sta MoveT
     jsr NewEmber
-    lda #16
-    sta SfxT            ; room-enter blip
+    lda #32
+    sta SfxT            ; room-enter fanfare (higher/longer than blips)
     rts
 
 ; ==================== Main Loop ====================
@@ -279,9 +279,9 @@ RandDone:
 ; Y is clamped to 136 so the 3-object draw layout always fits in 168 lines.
 NewEmber:
     jsr Rand8
-    and #$7F
+    and #$77
     clc
-    adc #12             ; X: 12..139
+    adc #16             ; X: 16..135 (inside walls at 12-15 / 144-147)
     sta EmberX
     jsr Rand8
     and #$7F
@@ -487,7 +487,7 @@ NotUp:
     and #$20            ; Down
     bne NotDown
     lda FireY
-    cmp #152
+    cmp #160
     bcc DownInc         ; below wall top: normal move
     ; at/below wall: only through the open door shaft
     lda DoorOpen
@@ -510,8 +510,8 @@ NotDown:
     cmp #153
     bcs NotLeft         ; in door shaft: no lateral move
     lda FireX
-    cmp #5
-    bcc NotLeft         ; min X = 4 (ball kisses left wall)
+    cmp #17
+    bcc NotLeft         ; min X = 16 (ball kisses left wall at 12-15)
     dec FireX
 NotLeft:
     lda SWCHA
@@ -521,8 +521,8 @@ NotLeft:
     cmp #153
     bcs NotRight        ; in door shaft: no lateral move
     lda FireX
-    cmp #148
-    bcs NotRight        ; max X = 148 (ball kisses right wall)
+    cmp #136
+    bcs NotRight        ; max X = 136 (ball kisses right wall at 144-147)
     inc FireX
 NotRight:
     ; safety: if FireX ever wraps/invalid (>160), reset to center
@@ -600,15 +600,15 @@ ExInc:
     inc EnemyX
 ExClamp:
     lda EnemyX
-    cmp #5
-    bcc ExMin           ; min X = 4
-    cmp #149
-    bcc ExDone          ; max X = 148
-    lda #148
+    cmp #17
+    bcc ExMin           ; min X = 16
+    cmp #137
+    bcc ExDone          ; max X = 136
+    lda #136
     sta EnemyX
     jmp ExDone
 ExMin:
-    lda #4
+    lda #16
     sta EnemyX
 ExDone:
     ; move Y toward player
@@ -621,10 +621,11 @@ ExDone:
 EyInc:
     inc EnemyY
 EyClamp:
+EyClamp:
     lda EnemyY
-    cmp #153
-    bcc EyDone          ; max Y = 152 (layout fit)
-    lda #152
+    cmp #161
+    bcc EyDone          ; max Y = 160 (layout fit)
+    lda #160
     sta EnemyY
 EyDone:
 SkipShadeMove:
