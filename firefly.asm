@@ -281,7 +281,7 @@ NewEmber:
     jsr Rand8
     and #$77
     clc
-    adc #16             ; X: 16..135 (inside walls at 12-15 / 144-147)
+    adc #8              ; X: 8..127 (inside play area)
     sta EmberX
     jsr Rand8
     and #$7F
@@ -487,7 +487,7 @@ NotUp:
     and #$20            ; Down
     bne NotDown
     lda FireY
-    cmp #160
+    cmp #152
     bcc DownInc         ; below wall top: normal move
     ; at/below wall: only through the open door shaft
     lda DoorOpen
@@ -510,8 +510,8 @@ NotDown:
     cmp #153
     bcs NotLeft         ; in door shaft: no lateral move
     lda FireX
-    cmp #17
-    bcc NotLeft         ; min X = 16 (ball kisses left wall at 12-15)
+    cmp #1
+    bcc NotLeft         ; min X = 0 (ball at edge)
     dec FireX
 NotLeft:
     lda SWCHA
@@ -521,8 +521,8 @@ NotLeft:
     cmp #153
     bcs NotRight        ; in door shaft: no lateral move
     lda FireX
-    cmp #136
-    bcs NotRight        ; max X = 136 (ball kisses right wall at 144-147)
+    cmp #128
+    bcs NotRight        ; max X = 128
     inc FireX
 NotRight:
     ; safety: if FireX ever wraps/invalid (>160), reset to center
@@ -600,15 +600,15 @@ ExInc:
     inc EnemyX
 ExClamp:
     lda EnemyX
-    cmp #17
-    bcc ExMin           ; min X = 16
-    cmp #137
-    bcc ExDone          ; max X = 136
-    lda #136
+    cmp #1
+    bcc ExMin           ; min X = 0
+    cmp #129
+    bcc ExDone          ; max X = 128
+    lda #128
     sta EnemyX
     jmp ExDone
 ExMin:
-    lda #16
+    lda #0
     sta EnemyX
 ExDone:
     ; move Y toward player
@@ -623,9 +623,9 @@ EyInc:
 EyClamp:
 EyClamp:
     lda EnemyY
-    cmp #161
-    bcc EyDone          ; max Y = 160 (layout fit)
-    lda #160
+    cmp #153
+    bcc EyDone          ; max Y = 152 (layout fit)
+    lda #152
     sta EnemyY
 EyDone:
 SkipShadeMove:
