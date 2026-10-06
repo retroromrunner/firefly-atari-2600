@@ -86,6 +86,9 @@ Gap0        = $A3    ; blank lines before A
 Gap1        = $A4    ; blank lines between A and B
 Gap2        = $A5    ; blank lines between B and C
 Rest        = $A6    ; blank lines after C
+IsPower     = $A7    ; 0=regular ember, 1=power ember (freeze)
+HasFreeze   = $A8    ; 0/1: player holds freeze power
+FreezeT     = $A9    ; shade freeze timer (0=not frozen)
 
 ; ==================== Code ====================
     ORG $F000
@@ -132,6 +135,9 @@ ResetGame:
     sta DeathT
     sta SfxT
     sta MusT
+    sta IsPower
+    sta HasFreeze
+    sta FreezeT
     lda #1
     sta Room
     lda #80
@@ -172,6 +178,9 @@ NextRoom:
     lda #0
     sta RoomScore
     sta DoorOpen
+    sta IsPower
+    sta HasFreeze
+    sta FreezeT
     lda #80
     sta FireX
     lda #16
@@ -552,6 +561,21 @@ NotRight:
     lda #76
     sta FireY
 NoWrapFix:
+    ; fire button: trigger shade freeze if power held
+    lda INPT4
+    and #$80
+    bne NoFreezeBtn      ; button not pressed
+    lda HasFreeze
+    beq NoFreezeBtn      ; no freeze power
+    lda FreezeT
+    bne NoFreezeBtn      ; already frozen
+    lda #0
+    sta HasFreeze        ; consume power
+    lda #180
+    sta FreezeT          ; 3-second freeze
+    lda #40
+    sta SfxT             ; freeze zap sound
+NoFreezeBtn:
     ; ---- collision: firefly vs ember ----
     lda FireX
     sec
@@ -576,31 +600,60 @@ CYPos:
     ; collect! score+1 (BCD), respawn ember, play sound
     sed
     clc
+    ; collect! check if power ember
+    lda IsPower
+    beq RegularCollect
+    ; POWER ember: grant freeze ability
+    lda #0
+    sta IsPower          ; consumed
+    lda #1
+    sta HasFreeze
+    lda #255
+    sta EmberX           ; hide (off-screen)
+    sta EmberY
+    lda #36
+    sta SfxT             ; power-up sound (higher)
+    jmp NoHit
+RegularCollect:
+    sed
+    clc
     lda Score
     adc #1
     cld
     sta Score
     inc Points
     inc RoomScore
-    jsr NewEmber
     lda #12
-    sta SfxT            ; collect blip
-    ; door opens when RoomScore >= 4+Room
+    sta SfxT            ; collect blip (may be overridden)
+    ; door opens when RoomScore >= 4+Room ?
     lda DoorOpen
-    bne NoHit
+    bne SpawnRegular
     lda Room
     clc
     adc #4
     sta TMP
     lda RoomScore
     cmp TMP
-    bcc NoHit
+    bcc SpawnRegular
+    ; DOOR OPENS: don't spawn regular ember; spawn POWER ember instead
     lda #1
     sta DoorOpen
+    sta IsPower
     lda #24
     sta SfxT            ; door chime (overrides blip)
+    jsr NewEmber        ; position for power ember
+    jmp NoHit
+SpawnRegular:
+    lda #0
+    sta IsPower
+    jsr NewEmber
 NoHit:
-    ; ---- shade AI: chase the firefly ----
+    ; ---- shade AI: chase the firefly (unless frozen) ----
+    lda FreezeT
+    beq NotFrozen
+    dec FreezeT          ; count down freeze
+    jmp SkipShadeMove    ; frozen: no movement
+NotFrozen:
     dec MoveT
     bne SkipShadeMove
     jsr CalcLevel
@@ -897,12 +950,24 @@ ScoreLp:
     tax
     lda RoomCols,x
     sta COLUPF          ; walls (+ firefly, the ball uses COLUPF)
-    lda #$1E
-    sta COLUP0          ; ember stays yellow
+    lda IsPower
+    beq EmberYellow
+    lda #$0E            ; power ember: bright white-blue
+    jmp EmberColDone
+EmberYellow:
+    lda #$1E            ; regular ember: yellow
+EmberColDone:
+    sta COLUP0
     jsr CalcLevel
     tax
+    lda FreezeT
+    bne ShadeFrozen
     lda EnemyCols,x
-    sta COLUP1          ; shade heats up with speed
+    jmp ShadeColDone
+ShadeFrozen:
+    lda #$8E            ; frozen shade: icy blue
+ShadeColDone:
+    sta COLUP1          ; shade heats up with speed (or icy when frozen)
     ; Top wall (8 lines) - full width.
     ; The last 2 lines reposition P1 for the shade: the score ones
     ; digit needed P1 in VBLANK, the shade needs it in the middle.
