@@ -487,7 +487,7 @@ NotUp:
     and #$20            ; Down
     bne NotDown
     lda FireY
-    cmp #152
+    cmp #156
     bcc DownInc         ; below wall top: normal move
     ; at/below wall: only through the open door shaft
     lda DoorOpen
@@ -521,8 +521,8 @@ NotLeft:
     cmp #153
     bcs NotRight        ; in door shaft: no lateral move
     lda FireX
-    cmp #128
-    bcs NotRight        ; max X = 128
+    cmp #132
+    bcs NotRight        ; max X = 132
     inc FireX
 NotRight:
     ; safety: if FireX ever wraps/invalid (>160), reset to center
@@ -602,9 +602,9 @@ ExClamp:
     lda EnemyX
     cmp #1
     bcc ExMin           ; min X = 0
-    cmp #129
-    bcc ExDone          ; max X = 128
-    lda #128
+    cmp #133
+    bcc ExDone          ; max X = 132
+    lda #132
     sta EnemyX
     jmp ExDone
 ExMin:
@@ -623,9 +623,9 @@ EyInc:
 EyClamp:
 EyClamp:
     lda EnemyY
-    cmp #153
-    bcc EyDone          ; max Y = 152 (layout fit)
-    lda #152
+    cmp #157
+    bcc EyDone          ; max Y = 156 (layout fit)
+    lda #156
     sta EnemyY
 EyDone:
 SkipShadeMove:
