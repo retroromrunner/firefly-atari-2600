@@ -206,8 +206,8 @@ NextRoom:
     lda TickTable,x
     sta MoveT
     jsr NewEmber
-    lda #32
-    sta SfxT            ; room-enter fanfare (higher/longer than blips)
+    lda #48
+    sta SfxT            ; room-enter fanfare (rises, reverse of death fall)
     rts
 
 ; ==================== Main Loop ====================
@@ -680,7 +680,7 @@ SpawnReg:
     lda HasFreeze
     bne CheckPower
     jsr NewPowerEmber
-    jmp CheckPower
+    jmp NoHit            ; don't check collect on spawn frame (avoid double-sound)
 CheckPower:
     ; POWER ember collision (if active)
     lda PowActive
@@ -710,8 +710,8 @@ PYPos:
     sta PowActive        ; consumed
     lda #1
     sta HasFreeze
-    lda #36
-    sta SfxT             ; power-up sound
+    lda #44
+    sta SfxT             ; power-up sound (distinct, longer)
 NoHit:
     ; ---- shade AI: chase the firefly (unless frozen) ----
     lda FreezeT
@@ -1215,6 +1215,8 @@ BallBlkDone:
 
 ; Ember: missile 0, 8 lines, blinking (different rate than firefly)
 EmberBlock:
+    lda DoorOpen
+    bne EmberSkip      ; door open: don't draw regular ember
     lda FrameCnt
     and #$08
     beq EmberBlkOff
@@ -1235,6 +1237,13 @@ EmberBlkOffLp:
 EmberBlkDone:
     lda #0
     sta ENAM0
+    rts
+EmberSkip:
+    ldx #8
+EmberSkipLp:
+    sta WSYNC
+    dex
+    bne EmberSkipLp
     rts
 
 ; Power ember: missile 1, 8 lines, blinking (white-blue)
