@@ -17,6 +17,7 @@ VSYNC   = $00
 VBLANK  = $01
 WSYNC   = $02
 NUSIZ0  = $04
+NUSIZ1  = $05
 COLUP0  = $06
 COLUP1  = $07
 COLUPF  = $08
@@ -130,6 +131,7 @@ ClearRam:
     sta Rand
     lda #$20
     sta NUSIZ0          ; missile 0 = 4px wide
+    sta NUSIZ1          ; missile 1 = 4px wide (power ember)
     jsr ResetGame
     jmp MainLoop
 
@@ -1045,10 +1047,22 @@ GameVbw:
     ldy #0
 ScoreLp:
     sta WSYNC
+    lda HasFreeze
+    beq DrawScore
+    lda FrameCnt
+    and #$20            ; blink score when freeze available
+    beq ScoreBlank
+DrawScore:
     lda (ScoreP0),y
     sta GRP0
     lda (ScoreP1),y
     sta GRP1
+    jmp ScoreNext
+ScoreBlank:
+    lda #0
+    sta GRP0
+    sta GRP1
+ScoreNext:
     iny
     cpy #8
     bne ScoreLp
@@ -1225,6 +1239,8 @@ EmberBlkDone:
 
 ; Power ember: missile 1, 8 lines, blinking (white-blue)
 PowerEmberBlock:
+    lda PowActive
+    beq PowSkip          ; not active: just blank 8 lines
     lda #$0E
     sta COLUP1          ; M1 uses COLUP1 (shared with P1/shade)
     lda FrameCnt
@@ -1247,6 +1263,13 @@ PowBlkOffLp:
 PowBlkDone:
     lda #0
     sta ENAM1
+    rts
+PowSkip:
+    ldx #8
+PowSkipLp:
+    sta WSYNC
+    dex
+    bne PowSkipLp
     rts
 
 ; Shade: player 1, 8x8 ghost sprite, solid (no blink - it's scary)
