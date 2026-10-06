@@ -131,3 +131,28 @@ Consolidates all fixes + new features:
 - Fire button: consume freeze → shade frozen 3 sec (icy blue), can't move.
 - Door exit fanfare (SfxT=32).
 Verified: py65 logic 16/16 + power 7/7 PASS.
+
+## v2.3 final (Oct 6, 2026)
+Cori feedback: power ember buggy (bottom wall disappeared), wants power ALONGSIDE regular (not after door), use-it-or-lose-it per room.
+Changes:
+- Fixed crash: EmberY=255 broke Y-sort (Rest=161, frame overrun). Now uses HB=0 to hide.
+- 4-object Y-sort: ball, regular ember (M0), shade (P1), power ember (M1). New vars YD/HD/TD/Gap3, SwapCD, PowerEmberBlock.
+- Power ember (white-blue, M1) spawns after 2nd regular collect, alongside regular. Player chooses which to risk.
+- Collect power → HasFreeze=1. Fire → FreezeT=180 (3 sec), shade icy blue, no move.
+- When door opens: regular hidden, power hidden (PowActive=0) — use it or lose it.
+- Freeze/HasFreeze reset in NextRoom (per-room).
+- M1 positioning via PosXM1 (HMM1/RESM1). COLUP1 shared: set per-block.
+Verified: py65 4/4 new design tests PASS.
+
+## v2.3 fixes round 2 (Oct 6, 2026)
+Cori feedback: power ember showed permanently as thin line; wanted freeze indicator, ember hidden on door open, distinct sounds.
+Changes:
+- NUSIZ1=$20: M1 4px wide (was default 1px thin line).
+- PowerEmberBlock checks PowActive: skips draw when not active (was always drawing 8 lines).
+- Score blinks when HasFreeze=1 (freeze-available indicator near score).
+- EmberBlock checks DoorOpen: regular ember hidden when door opens (was ghosting in upper-left).
+- Power spawn: jmp NoHit instead of CheckPower on spawn frame (avoids same-frame double-collect double-sound).
+- New sound timers: PowT ($B2, distinct distorted timbre AUDC0=$0C for power-up, priority over SfxT/MusT), FanT ($B3, 8-note rising scale 31,27,23,19,15,11,7,4 for room fanfare — reverse of death fall).
+- Audio handlers moved after AudioDone (DoFan/DoPow) to keep death bne in range.
+- NextRoom triggers FanT=1; power collect triggers PowT=30.
+Verified: dasm builds clean 4096 bytes; py65 logic tests still PASS.
