@@ -509,12 +509,14 @@ NotDown:
     lda FireY
     cmp #153
     bcc LeftGo          ; above door area: free move
+    lda DoorOpen
+    beq LeftGo          ; door closed: free move along bottom
     lda FireX
     cmp #66
     bcc LeftGo          ; left of shaft: free move
     cmp #86
     bcs LeftGo          ; right of shaft: free move
-    jmp NotLeft         ; in door shaft: no lateral move
+    jmp NotLeft         ; in open door shaft: no lateral move
 LeftGo:
     lda FireX
     cmp #1
@@ -527,12 +529,14 @@ NotLeft:
     lda FireY
     cmp #153
     bcc RightGo         ; above door area: free move
+    lda DoorOpen
+    beq RightGo         ; door closed: free move along bottom
     lda FireX
     cmp #66
     bcc RightGo         ; left of shaft: free move
     cmp #86
     bcs RightGo         ; right of shaft: free move
-    jmp NotRight        ; in door shaft: no lateral move
+    jmp NotRight        ; in open door shaft: no lateral move
 RightGo:
     lda FireX
     cmp #132
