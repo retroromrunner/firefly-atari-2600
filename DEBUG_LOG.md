@@ -91,3 +91,43 @@ New features (Cori's idea):
   ember stays yellow (COLUP0). Blink keeps the firefly distinguishable.
 - Build: dasm firefly.asm -f3 -ofirefly.bin (4096 bytes, vectors $F000).
 - NOT declared verified — awaiting Cori's RetroArch/Stella playtest.
+
+## v2 verification (Oct 6, 2026)
+- 6502 logic test via py65 (CPU+timer+joystick emulation, no video): ALL 16 PASS.
+  - Borders clamp at FireX=4 (left) and FireX=148 (right), hold under sustained input.
+  - Ember collect -> score+1, Points+1.
+  - Shade chases player (moves toward FireX/FireY).
+  - Shade collision -> DeathT=50 -> back to title, score reset.
+  - 5th ember in room 1 -> DoorOpen=1, SfxT=24 (door chime).
+  - Exit through door -> Room=2, DoorOpen=0, FireY=16 (top).
+- Test script: /tmp/test_ff_logic.py (uses AtariMem MMU, TIM64T/INTIM timer, SWCHA/INPT4).
+- Javatari visual test: pending (browser task) — must load exact v2 binary from GitHub raw URL.
+
+## v2.1 wall fix (Oct 6, 2026)
+Cori reported: right wall pass-through with wrap to left, left wall gap, bottom wall gap, no door-exit sound.
+Root cause: side walls are PF0=$10 -> clocks 12-15 (left) and 144-147 (right, mirrored). Clamps were at X=4/148 (inside/past walls).
+Fix: FireX clamp 16..136 (ball 16-23 flush vs wall 12-15; ball 136-143 flush vs wall 144-147). FireY max 152->160 (flush vs bottom wall). EnemyX/Y clamps updated to match. Ember spawn X 16..135. NextRoom SfxT 16->32 (distinct room-enter fanfare).
+Verified: py65 16/16 PASS with new clamps.
+
+## v2.4 (Oct 6, 2026)
+Cori: right/top good, left larger gap, bottom small gap + "sticky" (can't move left/right at bottom).
+Fixes:
+- Sticky: lateral block (Y>=153) was unconditional; now only blocks when actually in door shaft (X 66-85 AND Y>=153). Player at bottom wall (Y 153-158, X outside 66-85) can now move freely.
+- Bottom: 156->158 (2px closer).
+- Left wall: PF0 $10->$30 (4px->8px wide: 8-15 left, 144-151 right). Ball at X=0 (0-7) now 1px from wall (was 5px). Right unchanged (Cori said good).
+Backup of v2.2 working version: firefly-v2.2-working.bin/asm.
+
+## v2.5 (Oct 6, 2026)
+Cori: bottom still sticky.
+Root cause: lateral block (Y>=153, X 66-85) applied even when door CLOSED. Player at bottom wall at door X position got stuck.
+Fix: only block lateral when DoorOpen=1 AND in shaft. If door closed, free move along bottom.
+
+## v2.3 (Oct 6, 2026) - BEST VERSION per Cori
+Consolidates all fixes + new features:
+- Walls: right 132 (good), top good, left PF0 $30 (8px, 1px gap), bottom 158.
+- Sticky bottom fixed (door-open check for lateral block).
+- Door opens: NO regular ember spawns (player collected them all).
+- NEW: Power ember (white-blue) spawns when door opens. Collect → gain freeze ability.
+- Fire button: consume freeze → shade frozen 3 sec (icy blue), can't move.
+- Door exit fanfare (SfxT=32).
+Verified: py65 logic 16/16 + power 7/7 PASS.
