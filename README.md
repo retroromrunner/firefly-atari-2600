@@ -11,7 +11,8 @@ A minimal, clean Atari 2600 proof-of-concept game — now with a chaser enemy an
 - **Embers & score**: A blinking ember (missile 0) appears at a random spot. Fly into it to collect it for **+1** — with a collect sound blip — the score (00–99, BCD) shows at the top of the screen in TIA score mode, and a new ember spawns elsewhere.
 - **The shade**: A ghost sprite (player 1) hunts you. It moves toward you one step at a time, and every 4 points it gets faster — shifting from blue to purple to red to orange to white-hot as it speeds up. If it touches you: red flash, falling death buzz, back to the title screen.
 - **Rooms & the door**: Collect enough embers in a room (5 in room 1, 6 in room 2, …) and a door chime plays as a 24px gap opens in the bottom wall. Fly down through it to escape to the next room — new wall color, faster shade, more embers needed. How deep can you go?
-- **Audio**: TIA SFX (collect blip, door chime, room-enter blip, death buzz, start jingle) via `AUDC0`/`AUDF0`/`AUDV0`
+- **Power ember & freeze**: After your 2nd ember in a room, a white-blue **power ember** (missile 1) spawns alongside the regular one — risk/reward: chase the score, grab the power, or ignore it. Collect it to gain the **freeze power** (score blinks as the indicator). Press FIRE to freeze the shade solid for 3 seconds (icy blue, can't move). Use it or lose it — it resets every room.
+- **Audio**: TIA SFX (collect blip, power-up zap, door chime, rising room-fanfare scale, death buzz, start jingle) via `AUDC0`/`AUDF0`/`AUDV0`
 
 ## Files
 
@@ -32,7 +33,7 @@ dasm firefly.asm -f3 -ofirefly.bin
 - **Kernel**: 262-scanline frame (3 VSYNC + 37 VBLANK + 192 playfield + 30 overscan)
 - **Title**: playfield text via a 4px block font, ball sprite for the firefly dot
 - **Game**: ball sprite (8px, `CTRLPF=$31`) for the firefly, missile 0 (4px, `NUSIZ0=$20`) for the ember, player 1 (8×8 ghost sprite) for the shade, playfield for the wall border
-- **3-object kernel**: ball/ember/shade are Y-sorted in VBLANK into draw slots; a layout pass pushes overlapping objects down and precomputes exact blank gaps so the middle is always exactly 168 lines (Y limits: ball draw ≤144, ember ≤136, shade ≤152 — proven to always fit)
+- **4-object kernel**: ball/firefly, ember (M0), shade (P1), and power ember (M1) are Y-sorted in VBLANK into draw slots; a layout pass pushes overlapping objects down and precomputes exact blank gaps so the middle is always exactly 168 lines
 - **Shade repositioning**: player 1 is positioned in VBLANK for the score ones digit, then repositioned mid-kernel during the top-wall lines for the shade (other motion registers cleared so the extra `HMOVE` only moves the shade)
 - **Score**: BCD 00–99 in zero page, `sed`/`adc #1` on collect, digit pointers computed in VBLANK, drawn in 8 score-mode lines at the top of the kernel (`CTRLPF=$02`; in score mode the player digits take `COLUP0`/`COLUP1` — not `COLUPF` — so all three are set white)
 - **Shade AI**: frame-skipped chase (1px toward player per tick); tick rate from a level table driven by `Points/4 + Room - 1` (capped); color from a blue→white heat table
