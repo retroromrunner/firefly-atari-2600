@@ -28,6 +28,7 @@ PF2     = $0F
 RESP0   = $10
 RESP1   = $11
 RESM0   = $12
+RESM1   = $13
 RESBL   = $14
 GRP0    = $1B
 GRP1    = $1C
@@ -40,6 +41,7 @@ AUDV0   = $19
 HMP0    = $20
 HMP1    = $21
 HMM0    = $22
+HMM1    = $23
 HMBL    = $24
 HMOVE   = $2A
 HMCLR   = $2B
@@ -86,9 +88,17 @@ Gap0        = $A3    ; blank lines before A
 Gap1        = $A4    ; blank lines between A and B
 Gap2        = $A5    ; blank lines between B and C
 Rest        = $A6    ; blank lines after C
-IsPower     = $A7    ; 0=regular ember, 1=power ember (freeze)
+IsPower     = $A7    ; (unused, legacy)
 HasFreeze   = $A8    ; 0/1: player holds freeze power
 FreezeT     = $A9    ; shade freeze timer (0=not frozen)
+PowX        = $AA    ; power ember X
+PowY        = $AB    ; power ember Y
+PowActive   = $AC    ; 0/1: power ember visible
+YD          = $AD    ; draw slot D: Y (4th object)
+HD          = $AE    ; draw slot D: height
+TD          = $AF    ; draw slot D: type (3=power ember)
+Gap3        = $B0    ; blank lines between C and D
+ShadeCol    = $B1    ; precomputed shade color for EnemyBlock
 
 ; ==================== Code ====================
     ORG $F000
@@ -135,9 +145,9 @@ ResetGame:
     sta DeathT
     sta SfxT
     sta MusT
-    sta IsPower
     sta HasFreeze
     sta FreezeT
+    sta PowActive
     lda #1
     sta Room
     lda #80
@@ -178,9 +188,9 @@ NextRoom:
     lda #0
     sta RoomScore
     sta DoorOpen
-    sta IsPower
     sta HasFreeze
     sta FreezeT
+    sta PowActive
     lda #80
     sta FireX
     lda #16
@@ -254,6 +264,12 @@ PosXM0:
     sta RESM0
     rts
 
+PosXM1:
+    jsr PosXGen
+    sta HMM1
+    sta RESM1
+    rts
+
 ; Position ball (firefly)
 PosXBall:
     jsr PosXGen
@@ -301,6 +317,25 @@ NewEmber:
     lda #136            ; clamp Y to 136
 EmYOk:
     sta EmberY
+    rts
+
+NewPowerEmber:
+    jsr Rand8
+    and #$77
+    clc
+    adc #8              ; X: 8..127
+    sta PowX
+    jsr Rand8
+    and #$7F
+    clc
+    adc #12             ; Y: 12..139
+    cmp #137
+    bcc PowYOk
+    lda #136
+PowYOk:
+    sta PowY
+    lda #1
+    sta PowActive
     rts
 
 ; ==================== Text12 ====================
@@ -586,7 +621,9 @@ NoFreezeBtn:
     adc #1
 CXPos:
     cmp #9
-    bcs NoHit
+    bcc CXOk
+    jmp CheckPower
+CXOk:
     lda FireY
     sec
     sbc EmberY
@@ -596,25 +633,8 @@ CXPos:
     adc #1
 CYPos:
     cmp #11
-    bcs NoHit
-    ; collect! score+1 (BCD), respawn ember, play sound
-    sed
-    clc
-    ; collect! check if power ember
-    lda IsPower
-    beq RegularCollect
-    ; POWER ember: grant freeze ability
-    lda #0
-    sta IsPower          ; consumed
-    lda #1
-    sta HasFreeze
-    lda #255
-    sta EmberX           ; hide (off-screen)
-    sta EmberY
-    lda #36
-    sta SfxT             ; power-up sound (higher)
-    jmp NoHit
-RegularCollect:
+    bcs CheckPower
+    ; REGULAR ember collect! score+1 (BCD)
     sed
     clc
     lda Score
@@ -627,26 +647,69 @@ RegularCollect:
     sta SfxT            ; collect blip (may be overridden)
     ; door opens when RoomScore >= 4+Room ?
     lda DoorOpen
-    bne SpawnRegular
+    bne SpawnReg        ; already open (shouldn't happen)
     lda Room
     clc
     adc #4
     sta TMP
     lda RoomScore
     cmp TMP
-    bcc SpawnRegular
-    ; DOOR OPENS: don't spawn regular ember; spawn POWER ember instead
+    bcc SpawnReg
+    ; DOOR OPENS: hide regular ember (don't respawn)
     lda #1
     sta DoorOpen
-    sta IsPower
     lda #24
     sta SfxT            ; door chime (overrides blip)
-    jsr NewEmber        ; position for power ember
-    jmp NoHit
-SpawnRegular:
+    lda #160
+    sta EmberX          ; hide off-screen
     lda #0
-    sta IsPower
-    jsr NewEmber
+    sta EmberY
+    lda #0
+    sta PowActive        ; lose uncollected power ember (use it or lose it)
+    jmp CheckPower
+SpawnReg:
+    jsr NewEmber        ; respawn regular
+    ; spawn power ember after 2nd collect (if not already have/active)
+    lda RoomScore
+    cmp #2
+    bne CheckPower
+    lda PowActive
+    bne CheckPower
+    lda HasFreeze
+    bne CheckPower
+    jsr NewPowerEmber
+    jmp CheckPower
+CheckPower:
+    ; POWER ember collision (if active)
+    lda PowActive
+    beq NoHit
+    lda FireX
+    sec
+    sbc PowX
+    bcs PXPos
+    eor #$FF
+    clc
+    adc #1
+PXPos:
+    cmp #9
+    bcs NoHit
+    lda FireY
+    sec
+    sbc PowY
+    bcs PYPos
+    eor #$FF
+    clc
+    adc #1
+PYPos:
+    cmp #11
+    bcs NoHit
+    ; POWER collect: grant freeze
+    lda #0
+    sta PowActive        ; consumed
+    lda #1
+    sta HasFreeze
+    lda #36
+    sta SfxT             ; power-up sound
 NoHit:
     ; ---- shade AI: chase the firefly (unless frozen) ----
     lda FreezeT
@@ -770,6 +833,8 @@ SkipLogic:
     jsr PosXBall        ; firefly
     lda EmberX
     jsr PosXM0          ; ember
+    lda PowX
+    jsr PosXM1          ; power ember
     lda #68
     jsr PosXP0          ; score tens digit
     lda #76
@@ -850,8 +915,16 @@ BallYok:
     sta TA              ; 0 = firefly (ball)
     lda EmberY
     sta YB
+    ; hide regular ember if door open (player collected them all)
+    lda DoorOpen
+    beq EmberShow
+    lda #0              ; no ember: zero height
+    sta HB
+    jmp EmberSet
+EmberShow:
     lda #8
     sta HB
+EmberSet:
     lda #1
     sta TB              ; 1 = ember (missile 0)
     lda EnemyY
@@ -860,6 +933,20 @@ BallYok:
     sta HC
     lda #2
     sta TC              ; 2 = shade (player 1)
+    ; 4th object: power ember (missile 1)
+    lda PowY
+    sta YD
+    lda PowActive
+    beq PowHide
+    lda #8
+    jmp PowSetH
+PowHide:
+    lda #0
+PowSetH:
+    sta HD
+    lda #3
+    sta TD              ; 3 = power ember (missile 1)
+    ; bubble sort 4 items by Y
     lda YA
     cmp YB
     bcc SortS1
@@ -870,11 +957,26 @@ SortS1:
     bcc SortS2
     jsr SwapBC
 SortS2:
+    lda YC
+    cmp YD
+    bcc SortS3
+    jsr SwapCD
+SortS3:
     lda YA
     cmp YB
-    bcc SortS3
+    bcc SortS4
     jsr SwapAB
-SortS3:
+SortS4:
+    lda YB
+    cmp YC
+    bcc SortS5
+    jsr SwapBC
+SortS5:
+    lda YA
+    cmp YB
+    bcc SortS6
+    jsr SwapAB
+SortS6:
     ; ---- draw layout: push down on Y overlap ----
     ; Gaps are all >= 0 and sum to exactly 168 lines by construction.
     lda YA
@@ -906,11 +1008,24 @@ PCok:                    ; A = PC = max(YC, endB)
     clc
     adc TMP              ; A = PC
     clc
-    adc HC               ; A = PC+HC = endC (<= 168 by Y limits)
+    adc HC               ; A = PC+HC = endC
     sta TMP              ; TMP = endC
+    lda YD
+    cmp TMP              ; YD vs endC
+    bcs PDok
+    lda TMP
+PDok:                    ; A = PD = max(YD, endC)
+    sec
+    sbc TMP              ; Gap3 = PD-endC (>= 0)
+    sta Gap3
+    clc
+    adc TMP              ; A = PD
+    clc
+    adc HD               ; A = PD+HD = endD (<= 168 by Y limits)
+    sta TMP              ; TMP = endD
     lda #168
     sec
-    sbc TMP              ; Rest = 168-endC (>= 0)
+    sbc TMP              ; Rest = 168-endD (>= 0)
     sta Rest
 GameVbw:
     sta WSYNC
@@ -950,14 +1065,9 @@ ScoreLp:
     tax
     lda RoomCols,x
     sta COLUPF          ; walls (+ firefly, the ball uses COLUPF)
-    lda IsPower
-    beq EmberYellow
-    lda #$0E            ; power ember: bright white-blue
-    jmp EmberColDone
-EmberYellow:
-    lda #$1E            ; regular ember: yellow
-EmberColDone:
-    sta COLUP0
+    lda #$1E
+    sta COLUP0          ; regular ember: yellow (M0)
+    ; power ember (M1) color set in PowerEmberBlock
     jsr CalcLevel
     tax
     lda FreezeT
@@ -967,7 +1077,7 @@ EmberColDone:
 ShadeFrozen:
     lda #$8E            ; frozen shade: icy blue
 ShadeColDone:
-    sta COLUP1          ; shade heats up with speed (or icy when frozen)
+    sta ShadeCol        ; store for EnemyBlock (COLUP1 shared with M1)
     ; Top wall (8 lines) - full width.
     ; The last 2 lines reposition P1 for the shade: the score ones
     ; digit needed P1 in VBLANK, the shade needs it in the middle.
@@ -1006,6 +1116,10 @@ TopWall:
     ldx Gap2
     jsr BlankLines
     lda TC
+    jsr DrawDispatch
+    ldx Gap3
+    jsr BlankLines
+    lda TD
     jsr DrawDispatch
     ldx Rest
     jsr BlankLines
@@ -1046,16 +1160,20 @@ GameOsw:
     jmp MainLoop
 
 ; ==================== Draw Blocks ====================
-; Dispatch A: 0=firefly ball, 1=ember missile, 2=shade sprite
+; Dispatch A: 0=firefly ball, 1=ember missile, 2=shade sprite, 3=power ember
 DrawDispatch:
     cmp #1
     bcc DD_Ball
     beq DD_Ember
-    jmp EnemyBlock
+    cmp #2
+    beq DD_Shade
+    jmp PowerEmberBlock
 DD_Ball:
     jmp BallBlock
 DD_Ember:
     jmp EmberBlock
+DD_Shade:
+    jmp EnemyBlock
 
 ; Firefly: ball, 16 lines, blinking
 BallBlock:
@@ -1105,8 +1223,36 @@ EmberBlkDone:
     sta ENAM0
     rts
 
+; Power ember: missile 1, 8 lines, blinking (white-blue)
+PowerEmberBlock:
+    lda #$0E
+    sta COLUP1          ; M1 uses COLUP1 (shared with P1/shade)
+    lda FrameCnt
+    and #$08
+    beq PowBlkOff
+    ldx #8
+PowBlkOn:
+    sta WSYNC
+    lda #2
+    sta ENAM1
+    dex
+    bne PowBlkOn
+    jmp PowBlkDone
+PowBlkOff:
+    ldx #8
+PowBlkOffLp:
+    sta WSYNC
+    dex
+    bne PowBlkOffLp
+PowBlkDone:
+    lda #0
+    sta ENAM1
+    rts
+
 ; Shade: player 1, 8x8 ghost sprite, solid (no blink - it's scary)
 EnemyBlock:
+    lda ShadeCol
+    sta COLUP1          ; P1 uses COLUP1 (shared with M1/power)
     ldy #0
 EnBlLp:
     sta WSYNC
@@ -1148,6 +1294,21 @@ SwapBC:
     ldx TC
     sta TC
     stx TB
+    rts
+
+SwapCD:
+    lda YC
+    ldx YD
+    sta YD
+    stx YC
+    lda HC
+    ldx HD
+    sta HD
+    stx HC
+    lda TC
+    ldx TD
+    sta TD
+    stx TC
     rts
 
 ; ==================== Data ====================
