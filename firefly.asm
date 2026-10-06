@@ -487,7 +487,7 @@ NotUp:
     and #$20            ; Down
     bne NotDown
     lda FireY
-    cmp #156
+    cmp #158
     bcc DownInc         ; below wall top: normal move
     ; at/below wall: only through the open door shaft
     lda DoorOpen
@@ -508,7 +508,14 @@ NotDown:
     bne NotLeft
     lda FireY
     cmp #153
-    bcs NotLeft         ; in door shaft: no lateral move
+    bcc LeftGo          ; above door area: free move
+    lda FireX
+    cmp #66
+    bcc LeftGo          ; left of shaft: free move
+    cmp #86
+    bcs LeftGo          ; right of shaft: free move
+    jmp NotLeft         ; in door shaft: no lateral move
+LeftGo:
     lda FireX
     cmp #1
     bcc NotLeft         ; min X = 0 (ball at edge)
@@ -519,7 +526,14 @@ NotLeft:
     bne NotRight
     lda FireY
     cmp #153
-    bcs NotRight        ; in door shaft: no lateral move
+    bcc RightGo         ; above door area: free move
+    lda FireX
+    cmp #66
+    bcc RightGo         ; left of shaft: free move
+    cmp #86
+    bcs RightGo         ; right of shaft: free move
+    jmp NotRight        ; in door shaft: no lateral move
+RightGo:
     lda FireX
     cmp #132
     bcs NotRight        ; max X = 132
@@ -623,9 +637,9 @@ EyInc:
 EyClamp:
 EyClamp:
     lda EnemyY
-    cmp #157
-    bcc EyDone          ; max Y = 156 (layout fit)
-    lda #156
+    cmp #159
+    bcc EyDone          ; max Y = 158 (layout fit)
+    lda #158
     sta EnemyY
 EyDone:
 SkipShadeMove:
@@ -907,7 +921,7 @@ TopWall:
     sta HMOVE           ; apply shade fine offset
     ; Middle (168 lines) - side walls, 3 objects in Y order.
     ; Gaps precomputed in VBLANK; they sum to exactly 168 lines.
-    lda #$10            ; 4px on each side (with reflect)
+    lda #$30            ; 8px on each side (with reflect): 8-15 / 144-151
     sta PF0
     lda #0
     sta PF1
