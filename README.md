@@ -2,9 +2,7 @@
 
 A minimal, clean Atari 2600 proof-of-concept game — now with a chaser enemy and multi-room progression. Built as a starting point for new Atari 2600 homebrew projects.
 
-![FIREFLY gameplay](screenshot.png)
-
-![FIREFLY gameplay video](gameplay.gif)
+![FIREFLY gameplay](gameplay.gif)
 
 ## What it does
 
