@@ -102,10 +102,6 @@ Gap3        = $B0    ; blank lines between C and D
 ShadeCol    = $B1    ; precomputed shade color for EnemyBlock
 PowT        = $B2    ; power-up sound timer (distinct timbre)
 FanT        = $B3    ; room fanfare timer (rising scale)
-DoorWall    = $B4    ; 0=bottom,1=top,2=left,3=right
-DoorW       = $B5    ; door width (px for top/bot, lines for sides)
-DoorX       = $B6    ; door X (top/bottom, centered)
-DoorY       = $B7    ; door Y (left/right)
 
 ; ==================== Code ====================
     ORG $F000
@@ -158,10 +154,6 @@ ResetGame:
     sta PowActive
     sta PowT
     sta FanT
-    sta DoorWall
-    sta DoorW
-    sta DoorX
-    sta DoorY
     lda #1
     sta Room
     lda #80
@@ -547,17 +539,13 @@ NotUp:
     lda FireY
     cmp #158
     bcc DownInc         ; below wall top: normal move
-    ; at bottom: only through bottom door shaft
+    ; at/below wall: only through the open door shaft
     lda DoorOpen
     beq NotDown
-    lda DoorWall
-    bne NotDown         ; not bottom wall
     lda FireX
-    cmp DoorX
+    cmp #66             ; door shaft x-range
     bcc NotDown
-    sec
-    sbc DoorX
-    cmp DoorW
+    cmp #86
     bcs NotDown
     lda FireY
     cmp #166
@@ -568,37 +556,41 @@ NotDown:
     lda SWCHA
     and #$40            ; Left
     bne NotLeft
-    jsr InShaft
-    bcs NotLeft         ; in door shaft: no lateral move
+    lda FireY
+    cmp #153
+    bcc LeftGo          ; above door area: free move
+    lda DoorOpen
+    beq LeftGo          ; door closed: free move along bottom
     lda FireX
-    beq NotLeft
+    cmp #66
+    bcc LeftGo          ; left of shaft: free move
+    cmp #86
+    bcs LeftGo          ; right of shaft: free move
+    jmp NotLeft         ; in open door shaft: no lateral move
+LeftGo:
+    lda FireX
+    cmp #1
+    bcc NotLeft         ; min X = 0 (ball at edge)
     dec FireX
 NotLeft:
     lda SWCHA
     and #$80            ; Right
     bne NotRight
-    jsr InShaft
-    bcs NotRight        ; in door shaft: no lateral move
+    lda FireY
+    cmp #153
+    bcc RightGo         ; above door area: free move
+    lda DoorOpen
+    beq RightGo         ; door closed: free move along bottom
+    lda FireX
+    cmp #66
+    bcc RightGo         ; left of shaft: free move
+    cmp #86
+    bcs RightGo         ; right of shaft: free move
+    jmp NotRight        ; in open door shaft: no lateral move
+RightGo:
     lda FireX
     cmp #132
-    bcc RightInc
-    ; at right edge: only through right door
-    lda DoorOpen
-    beq NotRight
-    lda DoorWall
-    cmp #3
-    bne NotRight
-    lda FireY
-    cmp DoorY
-    bcc NotRight
-    sec
-    sbc DoorY
-    cmp DoorW
-    bcs NotRight
-    lda FireX
-    cmp #140
-    bcs NotRight
-RightInc:
+    bcs NotRight        ; max X = 132
     inc FireX
 NotRight:
     ; safety: if FireX ever wraps/invalid (>160), reset to center
@@ -610,94 +602,6 @@ NotRight:
     lda #76
     sta FireY
 NoWrapFix:
-    jmp MoveDone
-; InShaft: C=1 if player in open door shaft (block perpendicular move)
-InShaft:
-    lda DoorOpen
-    beq NoShaft
-    lda DoorWall
-    beq ShaftBot
-    cmp #1
-    beq ShaftTop
-    cmp #2
-    beq ShaftLeft
-    ; Right: X>=130, Y in [DoorY,DoorY+DoorW)
-    lda FireX
-    cmp #130
-    bcc NoShaft
-    jmp ShaftY
-ShaftLeft:
-    ; Left: X<=8, Y in [DoorY,DoorY+DoorW)
-    lda FireX
-    cmp #9
-    bcs NoShaft
-ShaftY:
-    lda FireY
-    cmp DoorY
-    bcc NoShaft
-    sec
-    sbc DoorY
-    cmp DoorW
-    bcc IsShaft
-    bcs NoShaft
-ShaftBot:
-    ; Bottom: Y>=153, X in [DoorX,DoorX+DoorW)
-    lda FireY
-    cmp #153
-    bcc NoShaft
-    jmp ShaftX
-ShaftTop:
-    ; Top: Y<=8, X in [DoorX,DoorX+DoorW)
-    lda FireY
-    cmp #9
-    bcs NoShaft
-ShaftX:
-    lda FireX
-    cmp DoorX
-    bcc NoShaft
-    sec
-    sbc DoorX
-    cmp DoorW
-    bcc IsShaft
-NoShaft:
-    clc
-    rts
-IsShaft:
-    sec
-    rts
-MoveDone:
-; SetupDoor: random wall, width by room, position
-SetupDoor:
-    lda Rand
-    and #$03
-    sta DoorWall        ; 0=bottom,1=top,2=left,3=right
-    lda Room
-    cmp #1
-    bne DoorNarrow
-    lda #40             ; room 1: wide door
-    jmp DoorWset
-DoorNarrow:
-    lda #24             ; room 2+: min width
-DoorWset:
-    sta DoorW
-    lda DoorWall
-    cmp #2
-    bcs DoorSideY
-    lda DoorW
-    lsr
-    sta TMP
-    lda #80
-    sec
-    sbc TMP             ; DoorX = 80 - DoorW/2 (centered)
-    sta DoorX
-    rts
-DoorSideY:
-    lda Rand
-    and #$3F
-    clc
-    adc #40             ; DoorY = 40-103
-    sta DoorY
-    rts
     ; fire button: trigger shade freeze if power held
     lda INPT4
     and #$80
@@ -760,7 +664,6 @@ CYPos:
     ; DOOR OPENS: hide regular ember (don't respawn)
     lda #1
     sta DoorOpen
-    jsr SetupDoor       ; random wall, width, position
     lda #24
     sta SfxT            ; door chime (overrides blip)
     lda #160
@@ -890,53 +793,16 @@ EDYPos:
     lda #50
     sta DeathT          ; caught!
 NoDeath:
-    ; ---- door exit: fly through the open door (random wall) ----
+    ; ---- door exit: fly through the open door ----
     lda DoorOpen
     beq SkipExit
-    lda DoorWall
-    beq ExitBottom
-    cmp #1
-    beq ExitTop
-    cmp #2
-    beq ExitLeft
-    ; ExitRight: FireX >= 134, FireY in [DoorY, DoorY+DoorW)
-    lda FireX
-    cmp #134
-    bcc SkipExit
-    jmp ExitCheckY
-ExitLeft:
-    ; FireX <= 6, FireY in [DoorY, DoorY+DoorW)
-    lda FireX
-    cmp #7
-    bcs SkipExit
-ExitCheckY:
     lda FireY
-    cmp DoorY
+    cmp #162
     bcc SkipExit
-    sec
-    sbc DoorY
-    cmp DoorW
-    bcs SkipExit
-    jsr NextRoom
-    jmp SkipExit
-ExitTop:
-    ; FireY <= 2, FireX in [DoorX, DoorX+DoorW)
-    lda FireY
-    cmp #3
-    bcs SkipExit
-    jmp ExitCheckX
-ExitBottom:
-    ; FireY >= 158, FireX in [DoorX, DoorX+DoorW)
-    lda FireY
-    cmp #158
-    bcc SkipExit
-ExitCheckX:
     lda FireX
-    cmp DoorX
+    cmp #66
     bcc SkipExit
-    sec
-    sbc DoorX
-    cmp DoorW
+    cmp #86
     bcs SkipExit
     jsr NextRoom
 SkipExit:
@@ -971,31 +837,8 @@ SkipLogic:
     ; ---- position objects ----
     lda FireX
     jsr PosXBall        ; firefly
-    ; M0: ember normally, side door when open (wall 2/3)
-    lda DoorOpen
-    beq PosEmberM0
-    lda DoorWall
-    cmp #2
-    bcc PosEmberM0
-    ; Side door: M0 at wall X, 8px wide
-    lda DoorWall
-    cmp #2
-    bne DoorRight
-    lda #8              ; left wall
-    jmp DoorPosM0
-DoorRight:
-    lda #144            ; right wall
-DoorPosM0:
-    jsr PosXM0
-    lda #$30
-    sta NUSIZ0          ; 8px wide for door
-    jmp M0Done
-PosEmberM0:
     lda EmberX
     jsr PosXM0          ; ember
-    lda #$20
-    sta NUSIZ0          ; 4px wide for ember
-M0Done:
     lda PowX
     jsr PosXM1          ; power ember
     lda #68
@@ -1120,32 +963,17 @@ BallYok:
     lda EmberY
     sta YB
     ; hide regular ember if door open (player collected them all)
-    ; if side door (wall 2/3), repurpose M0 slot as the door
     lda DoorOpen
     beq EmberShow
-    lda DoorWall
-    cmp #2
-    bcc HideEmber
-    ; Side door: B slot becomes door (M0, black)
-    lda DoorY
-    sta YB
-    lda DoorW
-    sta HB              ; door height in lines
-    lda #4
-    sta TB              ; 4 = door
-    jmp EmberDone
-HideEmber:
     lda #0              ; no ember: zero height
     sta HB
-    lda #1
-    sta TB
-    jmp EmberDone
+    jmp EmberSet
 EmberShow:
     lda #8
     sta HB
+EmberSet:
     lda #1
     sta TB              ; 1 = ember (missile 0)
-EmberDone:
     lda EnemyY
     sta YC
     lda #8
@@ -1309,32 +1137,12 @@ ShadeFrozen:
     lda #$8E            ; frozen shade: icy blue
 ShadeColDone:
     sta ShadeCol        ; store for EnemyBlock (COLUP1 shared with M1)
-    ; Top wall (8 lines) - full width, or door gap if top door.
+    ; Top wall (8 lines) - full width.
     ; The last 2 lines reposition P1 for the shade: the score ones
     ; digit needed P1 in VBLANK, the shade needs it in the middle.
     lda #$FF
     sta PF0
     sta PF1
-    lda DoorOpen
-    beq TopNoDoor
-    lda DoorWall
-    cmp #1
-    bne TopNoDoor
-    ; Top door: PF2 = $FF << (DoorW/8)
-    lda DoorW
-    lsr
-    lsr
-    lsr              ; /8
-    tax
-    lda #$FF
-TopPF2lp:
-    asl
-    dex
-    bne TopPF2lp
-    jmp TopPF2done
-TopNoDoor:
-    lda #$FF
-TopPF2done:
     sta PF2
     ldx #6
 TopWall:
@@ -1375,25 +1183,15 @@ TopWall:
     ldx Rest
     jsr BlankLines
 MidDone:
-    ; Bottom wall (8 lines) - full width, or door gap if bottom door.
+    ; Bottom wall (8 lines) - full width, or door gap when open.
+    ; Door: clear playfield bits 17-22 (24px centered, mirrored).
     lda #$FF
     sta PF0
     sta PF1
     lda DoorOpen
     beq DoorClosed
-    lda DoorWall
-    bne DoorClosed    ; not bottom (1=top,2/3=sides)
-    ; Bottom door: PF2 = $FF << (DoorW/8)
-    lda DoorW
-    lsr
-    lsr
-    lsr              ; /8
-    tax
-    lda #$FF
-BotPF2lp:
-    asl
-    dex
-    bne BotPF2lp
+    lda #$F8
+    sta PF2
     jmp DoorDraw
 DoorClosed:
     lda #$FF
@@ -1428,17 +1226,13 @@ DrawDispatch:
     beq DD_Ember
     cmp #2
     beq DD_Shade
-    cmp #3
-    beq DD_Power
-    jmp DoorBlock
+    jmp PowerEmberBlock
 DD_Ball:
     jmp BallBlock
 DD_Ember:
     jmp EmberBlock
 DD_Shade:
     jmp EnemyBlock
-DD_Power:
-    jmp PowerEmberBlock
 
 ; Firefly: ball, 16 lines, blinking
 BallBlock:
@@ -1468,8 +1262,6 @@ BallBlkDone:
 EmberBlock:
     lda DoorOpen
     bne EmberSkip      ; door open: don't draw regular ember
-    lda #$1E
-    sta COLUP0          ; yellow (door may have set black)
     lda FrameCnt
     and #$08
     beq EmberBlkOff
@@ -1532,21 +1324,6 @@ PowSkipLp:
     sta WSYNC
     dex
     bne PowSkipLp
-    rts
-
-; Door: missile 0, 8px wide, black (erases wall), HB lines
-DoorBlock:
-    lda #$00
-    sta COLUP0          ; black (background color)
-    ldx HB
-DoorLp:
-    sta WSYNC
-    lda #2
-    sta ENAM0
-    dex
-    bne DoorLp
-    lda #0
-    sta ENAM0
     rts
 
 ; Shade: player 1, 8x8 ghost sprite, solid (no blink - it's scary)
