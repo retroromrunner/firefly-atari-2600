@@ -156,15 +156,3 @@ Changes:
 - Audio handlers moved after AudioDone (DoFan/DoPow) to keep death bne in range.
 - NextRoom triggers FanT=1; power collect triggers PowT=30.
 Verified: dasm builds clean 4096 bytes; py65 logic tests still PASS.
-
-## v2.4 (Oct 6, 2026) - Random doors
-Cori request: doors on random walls (not just bottom), random positions, wider doors early that shrink per level (min 24px).
-Changes:
-- New vars: DoorWall ($B4: 0=bottom,1=top,2=left,3=right), DoorW ($B5), DoorX ($B6), DoorY ($B7).
-- SetupDoor subroutine: random wall via Rand&3; DoorW=40 room1, 24 room2+; DoorX centered (80-DoorW/2) for top/bottom; DoorY random 40-103 for sides.
-- Top/bottom doors: PF2 = $FF << (DoorW/8) ($E0=40px, $F0=32px, $F8=24px), centered via DoorX.
-- Side doors: repurpose ember's M0 slot (B in Y-sort) as door type 4; M0 positioned at X=8/144, 8px wide (NUSIZ0=$30), DoorBlock draws black rectangle HB=DoorW lines. Y-sort places it correctly.
-- COLUP0: DoorBlock sets black, EmberBlock resets to yellow ($1E).
-- Movement: InShaft subroutine blocks perpendicular move in door shaft; right edge allows to X=140 through right door.
-- Exit: 4-wall check (bottom Y>=158, top Y<=2, left X<=6, right X>=134) with door range validation.
-Verified: dasm builds clean. Needs Cori playtest.
